@@ -25,8 +25,25 @@
 
 <section id="mic-bar" class="mic-bar">
   <button id="mic-btn" class="primary">🎤 开启麦克风</button>
-  <div class="meter" title="输入电平"><div id="meter-fill"></div><div id="meter-gate"></div></div>
-  <span id="mic-status" class="muted">麦克风未开启。所有声音只在你的浏览器里分析，不会上传。</span>
+  <div class="meter-wrap">
+    <div class="meter" title="输入电平（红线 = 噪声门限，超过才算听到）"><div id="meter-fill"></div><div id="meter-gate"></div></div>
+    <span id="hear" class="hear">未开启</span>
+  </div>
+  <span id="mic-status" class="muted small">声音只在你的浏览器里分析，不会上传。</span>
+</section>
+
+<section id="onboard" class="onboard card" hidden>
+  <div class="row between"><h2>三步开始 · Quick start</h2><button id="ob-close" class="link">跳过 ✕</button></div>
+  <ol class="steps">
+    <li id="ob-1"><div><b>允许麦克风</b><span class="muted small">点按钮后在浏览器弹窗里选「允许」。弹一下弦，电平条会动、出现「🎸 听到了」。</span></div>
+      <button id="ob-mic" class="primary">开启麦克风</button></li>
+    <li id="ob-2"><div><b>试听节拍器、选输出方式</b><span class="muted small">听不到？调大音量，关掉手机静音拨片。</span>
+      <span class="seg"><label><input type="radio" name="ob-out" value="speaker" checked> 外放（手机/电脑喇叭）</label><label><input type="radio" name="ob-out" value="headphones"> 戴耳机</label></span></div>
+      <button id="ob-click">🔊 试听</button></li>
+    <li id="ob-3"><div><b>校准延迟</b><span class="muted small">跟着 12 下「嘀」拨闷音（左手轻搭弦上），约 12 秒。</span><span id="ob-cal-status" class="small"></span></div>
+      <button id="ob-cal">开始校准</button></li>
+  </ol>
+  <p class="muted small">完成后建议先去「调音」把六根弦调准，然后从「节奏 · 70 BPM 四分音符」开始。</p>
 </section>
 <div id="mic-error" class="alert" hidden></div>
 
@@ -43,7 +60,7 @@
         <line id="tu-needle" x1="0" y1="0" x2="0" y2="-82" class="needle idle"/>
         <circle r="5" class="hub"/>
       </svg>
-      <div class="cents" id="tu-cents">0 音分</div>
+      <div class="cents" id="tu-cents">&nbsp;</div>
       <div class="verdict" id="tu-verdict">弹一根弦试试</div>
     </div>
     <div class="card">
@@ -73,7 +90,8 @@
           </select>
         </label>
         <label>容差 ±音分
-          <input id="pp-tol" type="number" min="5" max="50" step="1" value="20">
+          <input id="pp-tol" type="number" min="5" max="50" step="1" value="30">
+          <span class="muted small">新手 30，熟练后收到 15</span>
         </label>
         <label class="check"><input id="pp-oct" type="checkbox" checked> 允许八度不同</label>
         <label class="check"><input id="pp-adv" type="checkbox"> 弹错也前进</label>
@@ -87,13 +105,14 @@
       </div>
     </div>
     <div class="card">
-      <div class="target-line">
-        <div>目标 <span id="pp-target" class="big">—</span> <span id="pp-pos" class="muted"></span></div>
-        <div>听到 <span id="pp-heard" class="big">—</span> <span id="pp-dev" class="muted"></span></div>
+      <div class="play-grid">
+        <div class="play-box"><span class="lbl">目标 Target</span><span id="pp-target" class="huge">—</span><span id="pp-pos" class="muted"></span></div>
+        <div class="play-box"><span class="lbl">听到 Heard</span><span id="pp-heard" class="huge dim">—</span><span id="pp-dev" class="muted"></span></div>
       </div>
+      <div id="pp-msg" class="feedback"></div>
       <div class="bar-gauge"><div class="bar-zone" id="pp-zone"></div><div class="bar-needle" id="pp-needle"></div></div>
       <div id="pp-chips" class="chips"></div>
-      <div id="pp-msg" class="verdict"></div>
+      <div class="muted small" id="pp-progress"></div>
     </div>
     <div id="pp-result" class="card result" hidden></div>
   </section>
@@ -102,8 +121,9 @@
   <section id="tab-rhythm" class="panel">
     <div class="card">
       <div class="grid2">
-        <label>速度 BPM <span id="rh-bpm-val" class="pill">80</span>
-          <input id="rh-bpm" type="range" min="30" max="240" value="80">
+        <label>速度 BPM <span id="rh-bpm-val" class="pill">70</span>
+          <input id="rh-bpm" type="range" min="30" max="240" value="70">
+          <span class="row tight"><button type="button" class="mini" data-bpm="-5">−5</button><button type="button" class="mini" data-bpm="+5">+5</button><button type="button" class="mini" data-bpm="60">60</button><button type="button" class="mini" data-bpm="80">80</button><button type="button" class="mini" data-bpm="100">100</button></span>
         </label>
         <label>拍号
           <select id="rh-beats">
@@ -120,21 +140,31 @@
         <label>小节数
           <select id="rh-bars"><option>2</option><option selected>4</option><option>8</option><option>16</option></select>
         </label>
-        <label class="check"><input id="rh-sound" type="checkbox" checked> 节拍器出声</label>
+        <label>输出方式
+          <select id="rh-out">
+            <option value="speaker">外放（喇叭）· 自动忽略节拍器声</option>
+            <option value="headphones">戴耳机 · 检测最灵敏</option>
+            <option value="silent">静音 · 只看闪光</option>
+          </select>
+        </label>
+        <label>节拍器音量 <span id="rh-vol-val" class="pill">90%</span>
+          <input id="rh-vol" type="range" min="0" max="100" value="90">
+        </label>
         <label class="check"><input id="rh-accent" type="checkbox" checked> 重拍提示</label>
       </div>
       <div class="row">
         <button id="rh-metro">▶ 只开节拍器</button>
+        <button id="rh-test" title="立刻响 4 下">🔊 试听</button>
         <button id="rh-start" class="primary">开始测节奏</button>
         <button id="rh-stop" disabled>停止</button>
       </div>
-      <p class="muted small">先数 1 小节预备拍，然后按每个细分点拨弦（闷音也可以）。<b>请戴耳机</b>，否则麦克风会把节拍器的声音也当成你的拨弦；没有耳机时可以关掉「节拍器出声」，只看闪光。当前延迟补偿：<span id="rh-lat">0</span> ms（在「设置」里校准）。</p>
+      <p class="muted small">先数 1 小节预备拍，然后在每个细分点拨弦（闷音也行）。外放模式下节拍器是高音「嘀」，检测时会跳过这个音域，不会当成你的拨弦。当前延迟补偿 <span id="rh-lat">0</span> ms<span id="rh-lat-warn"></span>。</p>
     </div>
     <div class="card">
       <div class="beats" id="rh-beats-vis"></div>
-      <div class="live-row">
-        <div>状态 <span id="rh-state" class="big">待开始</span></div>
-        <div>上一下 <span id="rh-last" class="big">—</span></div>
+      <div class="play-grid">
+        <div class="play-box"><span class="lbl">进度</span><span id="rh-state" class="huge">待开始</span><span id="rh-sub-state" class="muted"></span></div>
+        <div class="play-box"><span class="lbl">上一下 · 早/晚</span><span id="rh-last" class="huge">—</span><span id="rh-last-grade" class="muted"></span></div>
       </div>
       <canvas id="rh-canvas" height="160"></canvas>
       <p class="muted small">图：每个点是一下拨弦；横轴是拍点顺序，纵轴是偏差（上 = 晚，下 = 早），灰带为 ±20 ms。</p>
@@ -162,7 +192,7 @@
   <section id="tab-settings" class="panel">
     <div class="card">
       <h2>延迟校准 Latency</h2>
-      <p class="small">麦克风和耳机都有延迟，浏览器无法准确知道总延迟。校准会响 4 下预备拍 + 12 下 80 BPM 的拍子，请<b>跟着拍子拨闷音</b>（戴耳机，推荐），或者<b>外放且不弹</b>让麦克风直接听节拍器（只测硬件延迟）。取中位数作为补偿。</p>
+      <p class="small">麦克风和喇叭/耳机都有延迟，浏览器算不准总延迟。校准会先响 4 下预备拍，再响 12 下 80 BPM，请<b>跟着拍子拨闷音</b>，取中位数作为补偿。换设备或换耳机后要重新校准。</p>
       <div class="row">
         <button id="cal-start" class="primary">开始校准</button>
         <span id="cal-status" class="muted"></span>
@@ -177,6 +207,7 @@
         <label>标准音 A4 (Hz)
           <input id="set-a4" type="number" min="415" max="466" step="0.5" value="440">
         </label>
+        <label class="check"><input id="set-auto" type="checkbox" checked> 自动门限（按环境噪声自动调整）</label>
         <label>噪声门限 <span id="set-gate-val" class="pill">-50 dB</span>
           <input id="set-gate" type="range" min="-75" max="-20" value="-50">
         </label>
@@ -192,6 +223,7 @@
       <ul class="small">
         <li>只识别<b>单音</b>的音高；和弦/扫弦不判断音高，但节奏模式里扫弦能正常计为一下。</li>
         <li>所有处理都在本机浏览器里完成，不上传任何声音；记录存在 localStorage。</li>
+        <li><button id="ob-reopen" class="link">重新显示「三步开始」</button></li>
         <li>源代码：<a href="https://github.com/grot666/guitar-practice">github.com/grot666/guitar-practice</a></li>
       </ul>
     </div>
