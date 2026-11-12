@@ -1,6 +1,6 @@
 // app.js — 路由与各页面（首页 / 调音 / 曲库 / 认识指板 / 节奏 / 记录）
 import { $, $$, esc, settings, saveSettings, engine, metro, live, onPitch, onOnset, onMic, enableMic, disableMic, needMic,
-  loadHistory, addHistory, applyTheme, css, fmtC, pct, markChecked } from './core.js';
+  loadHistory, addHistory, applyTheme, css, fmtC, pct, markChecked, toast } from './core.js';
 import { SONGS, parseSong, makeFretDrill, OPEN_MIDI } from './songs.js';
 import { midiToFreq, midiName, noteFromFreq, centsBetween, matchOnsets, summarizeRhythm, gradeOf } from './dsp.js';
 import { drawBoard } from './fretboard.js';
@@ -12,11 +12,6 @@ applyTheme();
 initDrawer();
 
 // ---------- 小工具 ----------
-let toastT = 0;
-export function toast(msg, ms = 3200) {
-  const t = $('#toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), ms);
-}
 const STARS = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
 
 // ---------- 麦克风状态胶囊 ----------
@@ -139,7 +134,11 @@ let lockStr = -1;
   w.querySelectorAll('button').forEach((b) => (b.onclick = async () => {
     lockStr = +b.dataset.s;
     w.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
-    if (lockStr >= 0) { await engine.unlock(); engine.pluck(OPEN[lockStr], undefined, 1.6, 0.9); }
+    if (lockStr >= 0) {
+      await engine.unlock(); engine.pluck(OPEN[lockStr], undefined, 1.6, 0.9);
+      // 参考音放完再开麦克风：iPhone 一开麦克风，声音就会切到听筒、变小
+      if (!engine.micOn) { setTimeout(() => curView === 'tuner' && needMic(), 1700); return; }
+    }
     needMic();
   }));
 })();

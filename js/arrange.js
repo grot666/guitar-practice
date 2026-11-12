@@ -1,5 +1,5 @@
 // arrange.js — 编曲入门：旋律 / 和弦 / 低音 / 鼓 分层试听，5 个小课
-import { $, $$, esc, engine } from './core.js';
+import { $, $$, esc, engine, releaseMicForPlayback } from './core.js';
 import { ARRANGE, ARRANGE_SONGS, CHORDS, KEYS, DEGREES, PATTERNS, PC_NAME, scaleOf, slotsOf, fitOf, fitClass, songFit,
   autoHarmonize, minorColor, buildSchedule, chordChart, degreeOf, isChordTone } from './harmony.js';
 import { drawBoard, markShape } from './fretboard.js';
@@ -267,6 +267,6 @@ function renderAll() {
   $('#ar-chart').hidden = true;
   syncTempo(); renderSteps(); renderLesson(); renderGrid(); renderLayers();
 }
-export function openArrange() { renderAll(); }
+export function openArrange() { releaseMicForPlayback('（编曲页只播放，不用听）'); renderAll(); }
 export function closeArrange() { stop(); }
 export const arrangeState = () => ({ st, P });
