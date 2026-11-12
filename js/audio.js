@@ -37,14 +37,14 @@ export class AudioEngine {
     try { if (navigator.audioSession) navigator.audioSession.type = this.stream ? 'play-and-record' : 'playback'; } catch {}
   }
   get micOn() { return !!this.stream; }
-  async startMic() {
+  async startMic(deviceId) {
     if (this.stream) return;
     if (!window.isSecureContext) throw Object.assign(new Error('insecure'), { code: 'insecure' });
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('unsupported'), { code: 'unsupported' });
     const ctx = this.ensureContext();
     try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch {}
     this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1, ...(deviceId ? { deviceId: { exact: deviceId } } : {}) },
     });
     this.source = ctx.createMediaStreamSource(this.stream);
     const sink = ctx.createGain(); sink.gain.value = 0; sink.connect(ctx.destination);
@@ -77,6 +77,48 @@ export class AudioEngine {
     this.ringFilled = Math.min(L, this.ringFilled + data.length);
     this.lastFrameTime = startTime + data.length / this.ctx.sampleRate;
     for (const fn of this.listeners) fn(data, startTime);
+  }
+  async listInputs() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+    return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audioinput');
+  }
+  get deviceId() { const t = this.stream && this.stream.getAudioTracks()[0]; return t ? (t.getSettings().deviceId || '') : ''; }
+  get deviceLabel() { const t = this.stream && this.stream.getAudioTracks()[0]; return t ? t.label : ''; }
+  /** 合成一个拨弦音（Karplus-Strong，结果缓存），用于示范演奏和点按指板试听 */
+  _pluckBuffer(midi) {
+    this._pl = this._pl || new Map();
+    if (this._pl.has(midi)) return this._pl.get(midi);
+    const ctx = this.ctx, sr = ctx.sampleRate, f = 440 * Math.pow(2, (midi - 69) / 12);
+    const n = Math.round(sr * 1.6), buf = ctx.createBuffer(1, n, sr), x = buf.getChannelData(0);
+    const L = Math.max(2, Math.round(sr / f + 0.5)), line = new Float32Array(L);
+    let seed = midi * 9301 + 49297;
+    for (let i = 0; i < L; i++) { seed = (seed * 233280 + 49297) % 233280; line[i] = (seed / 233280) * 2 - 1; }
+    // 先低通一下初始噪声，音色更柔和
+    for (let k = 0; k < 2; k++) for (let i = 1; i < L; i++) line[i] = 0.5 * (line[i] + line[i - 1]);
+    let idx = 0;
+    const decay = 0.996 - (midi - 50) * 0.0001;
+    for (let i = 0; i < n; i++) {
+      const a = line[idx], b = line[(idx + 1) % L];
+      x[i] = a * 0.5;
+      line[idx] = decay * 0.5 * (a + b);
+      idx = (idx + 1) % L;
+    }
+    const fade = Math.round(sr * 0.05);
+    for (let i = 0; i < fade; i++) x[n - 1 - i] *= i / fade;
+    this._pl.set(midi, buf);
+    return buf;
+  }
+  /** 在时刻 t 弹一个音；dur 秒后止音 */
+  pluck(midi, t, dur = 1.2, vol = 0.8) {
+    const ctx = this.ensureContext();
+    const src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = this._pluckBuffer(midi);
+    t = t ?? ctx.currentTime + 0.02;
+    g.gain.setValueAtTime(vol, t);
+    g.gain.setTargetAtTime(0, t + Math.max(0.05, dur), 0.04);
+    src.connect(g); g.connect(this.master);
+    src.start(t); src.stop(t + Math.max(0.05, dur) + 0.3);
+    return src;
   }
   onChunk(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   /** 取最近 n 个样本 */
