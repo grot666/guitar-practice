@@ -9,33 +9,73 @@ export class AudioEngine {
   }
   ensureContext() {
     if (!this.ctx) {
+      this._setSession(); // iOS：要在创建 AudioContext 之前设好音频会话类型
       const AC = window.AudioContext || window.webkitAudioContext;
-      this.ctx = new AC({ latencyHint: 'interactive' });
-      // 输出总线：主音量 → 限幅器 → 扬声器，开大音量也不会爆音
+      try { this.ctx = new AC({ latencyHint: 'interactive' }); } catch { this.ctx = new AC(); }
+      // 输出总线：主音量 → 限幅器 → 输出 → 扬声器。拨弦音色已归一化，限幅器防止多层叠加时爆音
       this.master = this.ctx.createGain(); this.master.gain.value = 1;
       const lim = this.ctx.createDynamicsCompressor();
       lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.05;
-      this.master.connect(lim); lim.connect(this.ctx.destination);
+      this.out = this.ctx.createGain(); this.out.gain.value = 1;
+      this.master.connect(lim); lim.connect(this.out); this.out.connect(this.ctx.destination);
+      this.ctx.onstatechange = () => this._emit();
     }
-    if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
+    if (this.ctx.state !== 'running' && this.ctx.state !== 'closed') { try { const p = this.ctx.resume(); p && p.catch && p.catch(() => {}); } catch {} }
     return this.ctx;
   }
-  /** 必须在用户点击里调用：等 AudioContext 真正运行，再播一段静音“解锁”iOS 的声音输出 */
-  async unlock() {
-    const ctx = this.ensureContext();
+  /**
+   * 同步解锁：必须在用户点按的事件处理里调用（前面不能有 await）。
+   * 创建/恢复 AudioContext，播一段 1 样本的静音；keepAlive 时在老 iOS 上再播一个循环的静音 <audio>，
+   * 让系统把它当成「媒体播放」，静音拨片打开时 Web Audio 也不会被静音。
+   */
+  unlockSync(keepAlive = false) {
     this._setSession();
-    try { if (ctx.state !== 'running') await ctx.resume(); } catch {}
-    if (!this._unlocked) {
-      const b = ctx.createBuffer(1, 1, ctx.sampleRate), src = ctx.createBufferSource();
-      src.buffer = b; src.connect(ctx.destination); src.start();
+    const ctx = this.ensureContext();
+    if (!this._unlocked || ctx.state !== 'running') {
+      try { const b = ctx.createBuffer(1, 1, ctx.sampleRate), src = ctx.createBufferSource(); src.buffer = b; src.connect(ctx.destination); src.start(0); } catch {}
       this._unlocked = true;
     }
+    if (keepAlive) this._keepAlive();
+    return ctx;
+  }
+  /** 播放前调用：同步解锁 + 等待 resume（最多 0.5 秒，iOS 被打断时 resume 可能一直不返回） */
+  async unlock() {
+    const ctx = this.unlockSync(true);
+    if (ctx.state !== 'running') {
+      try { await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 500))]); } catch {}
+    }
+    this.checkRunning();
     return ctx.state === 'running';
   }
+  get isIOS() { return /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); }
+  _keepAlive() {
+    // 只在没有 navigator.audioSession 的老 iOS（≤16）上需要；开着麦克风时不用（会话是 play-and-record）
+    if (!this.isIOS || navigator.audioSession || this.stream) return;
+    if (!this._silentEl) {
+      const sr = 8000, n = sr / 2, b = new DataView(new ArrayBuffer(44 + n * 2));
+      const w = (o, str) => [...str].forEach((c, i) => b.setUint8(o + i, c.charCodeAt(0)));
+      w(0, 'RIFF'); b.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt '); b.setUint32(16, 16, true); b.setUint16(20, 1, true); b.setUint16(22, 1, true);
+      b.setUint32(24, sr, true); b.setUint32(28, sr * 2, true); b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, 'data'); b.setUint32(40, n * 2, true);
+      const el = document.createElement('audio');
+      el.src = URL.createObjectURL(new Blob([b.buffer], { type: 'audio/wav' }));
+      el.loop = true; el.setAttribute('playsinline', ''); el.setAttribute('x-webkit-airplay', 'deny'); el.preload = 'auto';
+      this._silentEl = el;
+    }
+    if (this._silentEl.paused) { try { const p = this._silentEl.play(); p && p.catch && p.catch(() => {}); } catch {} }
+  }
+  /** 播放后检查：0.6 秒后还没运行，就通知界面显示「点一下开启声音」 */
+  checkRunning() {
+    if (this._chk) return;
+    this._chk = setTimeout(() => { this._chk = 0; this._emit(); }, 600);
+  }
+  get blocked() { return !!this.ctx && this.ctx.state !== 'running'; }
+  onState(fn) { (this._stateFns = this._stateFns || new Set()).add(fn); }
+  _emit() { (this._stateFns || []).forEach((f) => f(this.ctx ? this.ctx.state : 'none')); }
   /** iOS 17+：没开麦克风时用 playback，静音拨片打开也能出声；开麦克风时用 play-and-record */
   _setSession() {
     try { if (navigator.audioSession) navigator.audioSession.type = this.stream ? 'play-and-record' : 'playback'; } catch {}
   }
+  get sessionType() { try { return navigator.audioSession ? navigator.audioSession.type : ''; } catch { return ''; } }
   get micOn() { return !!this.stream; }
   async startMic(deviceId) {
     if (this.stream) return;
@@ -63,6 +103,7 @@ export class AudioEngine {
       this.node = sp;
     }
     this.source.connect(this.node); this.node.connect(sink);
+    if (this._silentEl && !this._silentEl.paused) this._silentEl.pause();
     this.stream.getAudioTracks()[0].addEventListener('ended', () => this.stopMic());
   }
   stopMic() {
@@ -90,21 +131,34 @@ export class AudioEngine {
     if (this._pl.has(midi)) return this._pl.get(midi);
     const ctx = this.ctx, sr = ctx.sampleRate, f = 440 * Math.pow(2, (midi - 69) / 12);
     const n = Math.round(sr * 1.6), buf = ctx.createBuffer(1, n, sr), x = buf.getChannelData(0);
-    const L = Math.max(2, Math.round(sr / f + 0.5)), line = new Float32Array(L);
-    let seed = midi * 9301 + 49297;
-    for (let i = 0; i < L; i++) { seed = (seed * 233280 + 49297) % 233280; line[i] = (seed / 233280) * 2 - 1; }
+    // 这种环形写法的周期 = L − 0.5（平均滤波读的是下一个样本），再加全通滤波的小数延迟 d，在任何采样率下都调准
+    const P = sr / f; let L = Math.floor(P + 0.5), d = P + 0.5 - L;
+    if (d < 0.1) { L -= 1; d += 1; }
+    L = Math.max(2, L);
+    const C = (1 - d) / (1 + d), line = new Float32Array(L);
+    // 初始噪声（确定性的 LCG，每个音高固定，结果可缓存）
+    let seed = (midi * 7919 + 104729) % 233280;
+    for (let i = 0; i < L; i++) { seed = (seed * 9301 + 49297) % 233280; line[i] = (seed / 233280) * 2 - 1; }
     // 先低通一下初始噪声，音色更柔和
     for (let k = 0; k < 2; k++) for (let i = 1; i < L; i++) line[i] = 0.5 * (line[i] + line[i - 1]);
+    // 去掉直流分量：随机噪声的均值不为 0，Karplus-Strong 的平均滤波会一直保留它（听不见、却占掉音量和限幅余量）
+    { let m = 0; for (let i = 0; i < L; i++) m += line[i]; m /= L; for (let i = 0; i < L; i++) line[i] -= m; }
     let idx = 0;
     const decay = 0.996 - (midi - 50) * 0.0001;
+    let apX = 0, apY = 0;
     for (let i = 0; i < n; i++) {
       const a = line[idx], b = line[(idx + 1) % L];
-      x[i] = a * 0.5;
-      line[idx] = decay * 0.5 * (a + b);
+      x[i] = a;
+      const avg = decay * 0.5 * (a + b);
+      const y = C * avg + apX - C * apY; apX = avg; apY = y; // 一阶全通：小数延迟
+      line[idx] = y;
       idx = (idx + 1) % L;
     }
     const fade = Math.round(sr * 0.05);
     for (let i = 0; i < fade; i++) x[n - 1 - i] *= i / fade;
+    // 归一化到峰值 0.6：不同音高、不同采样率（44.1k / 48k）响度一致，手机外放也够响
+    let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(x[i]));
+    if (pk > 0) { const k = 0.6 / pk; for (let i = 0; i < n; i++) x[i] *= k; }
     this._pl.set(midi, buf);
     return buf;
   }
@@ -118,6 +172,7 @@ export class AudioEngine {
     g.gain.setTargetAtTime(0, t + Math.max(0.05, dur), 0.04);
     src.connect(g); g.connect(this.master);
     src.start(t); src.stop(t + Math.max(0.05, dur) + 0.3);
+    if (ctx.state !== 'running') this.checkRunning();
     return src;
   }
   onChunk(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -158,6 +213,7 @@ export class Metronome {
     this.index = 0;
     this._schedule();
     this.timer = setInterval(() => this._schedule(), 25);
+    if (ctx.state !== 'running') this.engine.checkRunning();
     return this.startTime;
   }
   stop() { this.running = false; clearInterval(this.timer); this.timer = null; }

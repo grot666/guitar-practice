@@ -149,3 +149,39 @@ export const fmtC = (c) => (c > 0 ? '+' : '') + Math.round(c);
 export const pct = (x) => Math.round(x * 100) + '%';
 export const STR_NAME = { 1: '1 弦', 2: '2 弦', 3: '3 弦', 4: '4 弦', 5: '5 弦', 6: '6 弦' };
 export const posText = (s, f) => `${STR_NAME[s]} ${f === 0 ? '空弦' : f + ' 品'}`;
+
+// ---------- 提示条 ----------
+let toastT = 0;
+export function toast(msg, ms = 3200) {
+  const t = $('#toast'); if (!t) return;
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), ms);
+}
+
+// ---------- 声音解锁（所有播放路径共用） ----------
+// 1) 每次点按（捕获阶段，在按钮自己的处理函数之前）同步创建/恢复 AudioContext，
+//    这样即使按钮处理函数里先 await 了别的（比如开麦克风），声音也已经解锁。
+for (const ev of ['pointerdown', 'touchend', 'pointerup', 'click', 'keydown']) {
+  window.addEventListener(ev, () => { if (!engine.ctx || engine.ctx.state !== 'running') engine.unlockSync(ev !== 'pointerdown'); }, { capture: true, passive: true });
+}
+// 2) 切回前台 / 来电打断后：尝试恢复；恢复不了就显示「点一下开启声音」，下一次点按会恢复
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && engine.ctx && engine.ctx.state !== 'running') { engine.ctx.resume().catch(() => {}); engine.checkRunning(); }
+});
+// 3) 播放了但 AudioContext 没在运行 → 显示提示条
+function syncSoundBanner() {
+  const b = $('#sound-banner'); if (!b) return;
+  b.hidden = !(engine.blocked && document.visibilityState === 'visible');
+}
+engine.onState(syncSoundBanner);
+document.addEventListener('DOMContentLoaded', () => {
+  const b = $('#sound-banner');
+  if (b) b.onclick = async () => { await engine.unlock(); syncSoundBanner(); if (!engine.blocked) engine.pluck(72, undefined, 0.6, 0.6); };
+});
+/** 只需要播放、不需要听的页面：关掉麦克风。iPhone 开着麦克风时声音会走听筒（很小声），部分安卓也会降低媒体音量 */
+export function releaseMicForPlayback(reason = '') {
+  if (!engine.micOn) return false;
+  disableMic();
+  toast(`已关闭麦克风${reason}：开着麦克风时，手机外放声音会变小（iPhone 会从听筒出声）。`, 4200);
+  return true;
+}
