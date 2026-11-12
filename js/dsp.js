@@ -1,6 +1,21 @@
 // dsp.js — 纯计算模块（浏览器与 Node 共用，无 DOM 依赖）
 // 包含：音名换算、McLeod 音高检测 (MPM)、频谱通量起音检测、节奏匹配与评分、音准练习跟踪器
 
+/** 节拍器“嘀”声参数（浏览器与测试共用）：纯高频正弦 + 平滑包络，频谱集中在 2.3 kHz 以上 */
+export const CLICK = { accent: 3520, beat: 2960, sub: 2490, attack: 0.004, decay: 0.035, length: 0.2 };
+/** 外放模式：起音检测跳过节拍器“嘀”所在的频段（Hz），其余频段（含高频拨弦瞬态）照常使用 */
+export const SPEAKER_BAND = { notchLo: 2100, notchHi: 4300, maxHz: 7000, delta: 0.05 }; // 7 kHz 以上也不看：手机扬声器失真会产生嘀声的 3 次谐波（≥7.4 kHz）
+/** 按 CLICK 参数合成一段嘀声（离线测试用，与浏览器里的振荡器包络一致） */
+export function synthClick(freq, sr, amp = 0.8) {
+  const n = Math.round(CLICK.length * sr), x = new Float32Array(n), a = CLICK.attack * sr;
+  for (let i = 0; i < n; i++) {
+    const env = i < a ? 0.5 - 0.5 * Math.cos((Math.PI * i) / a) : Math.exp(-(i - a) / (CLICK.decay * sr));
+    const tail = Math.min(1, (n - i) / (0.02 * sr)); // 结尾淡出到 0，避免截断产生宽频“咔”
+    x[i] = amp * env * tail * Math.sin((2 * Math.PI * freq * i) / sr);
+  }
+  return x;
+}
+
 export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const NOTE_NAMES_ZH = ['C', '#C', 'D', '#D', 'E', 'F', '#F', 'G', '#G', 'A', '#A', 'B'];
 
@@ -147,6 +162,19 @@ function makeFFT(n) {
   };
 }
 
+/** 两级 Butterworth 双二阶低通（共 4 阶），返回逐样本处理函数 */
+function makeLowpass4(fc, sr) {
+  const w = (2 * Math.PI * fc) / sr, cw = Math.cos(w), al = Math.sin(w) / (2 * Math.SQRT1_2);
+  const a0 = 1 + al, b0 = (1 - cw) / 2 / a0, b1 = (1 - cw) / a0, b2 = b0, a1 = (-2 * cw) / a0, a2 = (1 - al) / a0;
+  const st = [0, 0, 0, 0, 0, 0, 0, 0];
+  const stage = (x, o) => {
+    const y = b0 * x + b1 * st[o] + b2 * st[o + 1] - a1 * st[o + 2] - a2 * st[o + 3];
+    st[o + 1] = st[o]; st[o] = x; st[o + 3] = st[o + 2]; st[o + 2] = y;
+    return y;
+  };
+  return (x) => stage(stage(x, 0), 4);
+}
+
 /**
  * 流式起音检测：对数幅度谱通量 + 自适应阈值 + 峰值拾取 + 去抖，再用子块能量细化时间
  * 用法：const det = new OnsetDetector(sr); det.process(float32Chunk, chunkStartTimeSec) → 新检测到的起音时间数组(秒)
@@ -179,12 +207,23 @@ export class OnsetDetector {
     this.frames = 0;
     this.warmup = opts.warmupFrames ?? 4; // 开头几帧（prevMag 从 0 开始）不报
     this.fluxTrace = opts.trace ? [] : null;
+    // 频带限制：外放模式下只看 minHz–maxHz（节拍器的高频“嘀”落在频带之外，不会被当成拨弦）
+    const binHz = sampleRate / this.frame;
+    this.kLo = Math.max(1, Math.round((opts.minHz ?? 0) / binHz));
+    this.kHi = Math.min(this.frame / 2, Math.round((opts.maxHz ?? sampleRate / 2) / binHz));
+    this.nLo = opts.notchLo ? Math.round(opts.notchLo / binHz) : -1;
+    this.nHi = opts.notchHi ? Math.round(opts.notchHi / binHz) : -1;
+    // 外放模式：细化起音时间用低通（1.2 kHz，4 阶）后的信号，避免嘀声能量干扰
+    this.lp = opts.notchLo ? makeLowpass4(1200, sampleRate) : null;
+    this.ringF = this.lp ? new Float32Array(this.frame * 4) : null;
+    this.nBins = (this.kHi - this.kLo) - (this.nLo >= 0 ? Math.max(0, Math.min(this.nHi, this.kHi) - Math.max(this.nLo, this.kLo)) : 0);
   }
   reset() {
     this.total = 0; this.t0 = null; this.nextFrameEnd = this.frame; this.hist = [];
     this.prevMag.fill(0); this.fluxPrev1 = this.fluxPrev2 = 0; this.lastOnset = -Infinity; this.frames = 0;
   }
   _sample(idx) { return this.ring[idx % this.bufLen]; }
+  _sampleR(idx) { return (this.ringF || this.ring)[idx % this.bufLen]; }
   process(chunk, startTime) {
     if (this.t0 === null) this.t0 = startTime - this.total / this.sr;
     else {
@@ -195,6 +234,7 @@ export class OnsetDetector {
     const out = [];
     for (let i = 0; i < chunk.length; i++) {
       this.ring[this.total % this.bufLen] = chunk[i];
+      if (this.lp) this.ringF[this.total % this.bufLen] = this.lp(chunk[i]);
       this.total++;
       if (this.total === this.nextFrameEnd) {
         const r = this._analyze(this.total);
@@ -217,13 +257,14 @@ export class OnsetDetector {
     this.fft(this.re, this.im);
     let flux = 0;
     const H = F / 2;
-    for (let k = 1; k < H; k++) {
+    for (let k = this.kLo; k < this.kHi; k++) {
+      if (k >= this.nLo && k < this.nHi) continue;
       const mag = Math.log1p(100 * Math.hypot(this.re[k], this.im[k]));
       const d = mag - this.prevMag[k];
       if (d > 0) flux += d;
       this.prevMag[k] = mag;
     }
-    flux /= H;
+    flux /= Math.max(1, this.nBins);
     // 自适应阈值：历史中位数 * mult + delta
     const sorted = this.hist.slice().sort((a, b) => a - b);
     const med = sorted.length ? sorted[sorted.length >> 1] : 0;
@@ -237,8 +278,9 @@ export class OnsetDetector {
     const p1 = this.fluxPrev1;
     this.frames++;
     if (this.frames > this.warmup && p1 > this.thrPrev1 && p1 > this.fluxPrev2 && p1 >= flux && this.rmsPrev1 > this.gate) {
-      const t = this._refine(this.frameEndPrev1);
-      if (t - this.lastOnset >= this.minInterval) {
+      const { t, ratio } = this._refine(this.frameEndPrev1);
+      // 真正的拨弦会让能量明显上升；手掌止音、音符结束的频谱变化会让通量变大但能量不升，排除
+      if (ratio > 1.6 && t - this.lastOnset >= this.minInterval) {
         this.lastOnset = t;
         result = t;
       }
@@ -251,11 +293,11 @@ export class OnsetDetector {
     const A = 128, Bk = 512, step = 16;
     const lo = Math.max(this.total - this.bufLen + Bk, frameEnd - this.frame - this.hop, Bk);
     const hi = this.total - A;
-    if (hi <= lo) return this.t0 + (frameEnd - this.frame / 2) / this.sr;
+    if (hi <= lo) return { t: this.t0 + (frameEnd - this.frame / 2) / this.sr, ratio: 2 };
     // 前缀能量
     const base = lo - Bk, len = hi + A - base;
     const cum = new Float64Array(len + 1);
-    for (let i = 0; i < len; i++) { const v = this._sample(base + i); cum[i + 1] = cum[i] + v * v; }
+    for (let i = 0; i < len; i++) { const v = this._sampleR(base + i); cum[i + 1] = cum[i] + v * v; }
     let best = lo, bestR = -Infinity;
     for (let p = lo; p <= hi; p += step) {
       const q = p - base;
@@ -264,7 +306,16 @@ export class OnsetDetector {
       const r = after / (before + 1e-9);
       if (r > bestR) { bestR = r; best = p; }
     }
-    return this.t0 + best / this.sr;
+    // 能量上升检查用更长的窗口（之后最多 1024 / 之前 1024 样本），避免低音一个周期内的起伏造成误判
+    const nA = Math.min(1024, this.total - best), nB = Math.min(1024, best - Math.max(0, this.total - this.bufLen));
+    let ratio = 2;
+    if (nA >= 192 && nB >= 256) {
+      let ea = 0, eb = 0;
+      for (let i = 0; i < nA; i++) { const v = this._sampleR(best + i); ea += v * v; }
+      for (let i = 1; i <= nB; i++) { const v = this._sampleR(best - i); eb += v * v; }
+      ratio = (ea / nA) / (eb / nB + 1e-12);
+    }
+    return { t: this.t0 + best / this.sr, ratio };
   }
 }
 

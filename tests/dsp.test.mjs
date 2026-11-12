@@ -1,4 +1,4 @@
-import { detectPitch, noteFromFreq, midiToFreq, detectOnsetsOffline, matchOnsets, summarizeRhythm, estimateLatency, NoteSequenceTracker, parseNoteName } from '../js/dsp.js';
+import { synthClick, CLICK, SPEAKER_BAND, detectPitch, noteFromFreq, midiToFreq, detectOnsetsOffline, matchOnsets, summarizeRhythm, estimateLatency, NoteSequenceTracker, parseNoteName } from '../js/dsp.js';
 import { sine, harmonic, pluck, addNoise, mixAt, click, rng } from './synth.mjs';
 
 let fails = 0;
@@ -212,6 +212,50 @@ console.log('== 13. 起音检测：扫弦（6 弦 25ms 内依次发声）应只�
   addNoise(sig2, 0.0005, 14);
   const r2 = onsetReport('弱拨', sig2, truth2);
   ok(r2.s.missed === 0 && r2.s.extra === 0, '弱拨应检出');
+}
+
+console.log('== 14. 外放模式：麦克风同时收到节拍器“嘀”声（含房间回声）+ 拨弦');
+{
+  const bpm = 80, beat = 60 / bpm, sig = new Float32Array(14 * SR), clicks = [], plucks = [];
+  const r = rng(99);
+  for (let i = 0; i < 16; i++) {
+    const t = 0.5 + i * beat; clicks.push(t);
+    // 手机小扬声器：音量开大、明显削波失真（tanh）
+    const c = synthClick(i % 4 === 0 ? CLICK.accent : CLICK.beat, SR, 0.9).map((v) => Math.tanh(2.5 * v) * 0.5);
+    // 扬声器 → 麦克风：直达声 + 两次反射
+    mixAt(sig, c, Math.round((t + 0.003) * SR));
+    mixAt(sig, c.map((v) => v * 0.35), Math.round((t + 0.017) * SR));
+    mixAt(sig, c.map((v) => v * 0.2), Math.round((t + 0.041) * SR));
+  }
+  // 前 4 拍只有节拍器（预备拍），之后在拍点附近 ±40ms 弹，第 10 拍故意不弹
+  for (let i = 4; i < 16; i++) {
+    if (i === 10) continue;
+    const t = clicks[i] + (r() - 0.5) * 0.08; plucks.push(t);
+    mixAt(sig, pluck(midiToFreq([45, 52, 57, 48][i % 4]), 1.0, SR, 0.4, 1200 + i).x, Math.round(t * SR));
+  }
+  addNoise(sig, 0.003, 15);
+  const full = detectOnsetsOffline(sig, SR).onsets;
+  const fullBleed = full.filter((o) => clicks.slice(0, 4).some((c) => Math.abs(o - c) < 0.06)).length;
+  console.log(`  全频带（耳机模式算法）：预备拍 4 下嘀声里被当成拨弦 ${fullBleed} 下`);
+  const { s, maxAbs } = onsetReport('外放（跳过嘀声频段）', sig, plucks, SPEAKER_BAND);
+  const banded = detectOnsetsOffline(sig, SR, SPEAKER_BAND).onsets;
+  const bleed = banded.filter((o) => clicks.slice(0, 4).some((c) => Math.abs(o - c) < 0.06)).length;
+  console.log(`  外放模式：预备拍嘀声误报 ${bleed} 下`);
+  ok(bleed === 0 && s.missed === 0 && s.extra === 0 && maxAbs < 15, '外放频带应忽略嘀声、拨弦全中');
+}
+
+console.log('== 15. 止音（每个音 0.4s 后 20ms 内被手掌按停）不应算成拨弦，两种模式');
+{
+  const sig = new Float32Array(8 * SR), truth = [];
+  for (let i = 0; i < 12; i++) {
+    const t = 0.5 + i * 0.6; truth.push(t);
+    const x = pluck(midiToFreq([45, 52, 57][i % 3]), 0.42, SR, 0.5, 1500 + i).x; // 合成器自带 20ms 淡出 = 突然止音
+    mixAt(sig, x, Math.round(t * SR));
+  }
+  addNoise(sig, 0.003, 16);
+  const a = onsetReport('耳机模式', sig, truth);
+  const b = onsetReport('外放模式', sig, truth, SPEAKER_BAND);
+  ok(a.s.extra === 0 && b.s.extra === 0 && a.s.missed === 0 && b.s.missed === 0, '止音不应误报');
 }
 
 console.log(fails ? `\n失败 ${fails} 项` : '\n全部通过');
