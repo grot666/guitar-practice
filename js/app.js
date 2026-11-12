@@ -1,7 +1,7 @@
 import { AudioEngine, Metronome } from './audio.js';
 import {
   detectPitch, noteFromFreq, midiToFreq, midiName, parseNoteName, centsBetween,
-  OnsetDetector, matchOnsets, summarizeRhythm, estimateLatency, NoteSequenceTracker, gradeOf, rms,
+  OnsetDetector, matchOnsets, summarizeRhythm, estimateLatency, NoteSequenceTracker, gradeOf, rms, SPEAKER_BAND,
 } from './dsp.js';
 
 const $ = (s) => document.querySelector(s);
@@ -11,7 +11,7 @@ const STRING_LABEL = ['6 弦', '5 弦', '4 弦', '3 弦', '2 弦', '1 弦'];
 
 // ---------------- 设置 / 存储 ----------------
 const LS_SET = 'guitar-practice:settings', LS_HIST = 'guitar-practice:history';
-const settings = Object.assign({ a4: 440, gateDb: -50, latencyMs: 0, sens: 3 }, safeJSON(localStorage.getItem(LS_SET)) || {});
+const settings = Object.assign({ a4: 440, gateDb: -50, autoGate: true, latencyMs: 0, sens: 3, outMode: 'speaker', volume: 0.9, onboardDone: false }, safeJSON(localStorage.getItem(LS_SET)) || {});
 function safeJSON(s) { try { return JSON.parse(s); } catch { return null; } }
 function saveSettings() { localStorage.setItem(LS_SET, JSON.stringify(settings)); }
 function loadHistory() { return safeJSON(localStorage.getItem(LS_HIST)) || []; }
@@ -21,10 +21,23 @@ function addHistory(entry) {
   localStorage.setItem(LS_HIST, JSON.stringify(h));
   renderHistory();
 }
-const gateRms = () => Math.pow(10, settings.gateDb / 20);
+// 自动门限：持续估计环境噪声（最近约 10 秒块电平的第 5 百分位，弹琴时也能找到音符间隙的底噪），门限 = 噪声 + 12 dB
+const noise = { blocks: [], floorDb: -55 };
+function trackNoise(data) {
+  const db = 20 * Math.log10(rms(data) + 1e-9);
+  noise.blocks.push(db); if (noise.blocks.length > 470) noise.blocks.shift();
+  if (noise.blocks.length >= 20 && noise.blocks.length % 10 === 0) {
+    const s = noise.blocks.slice().sort((a, b) => a - b);
+    noise.floorDb = s[Math.floor(s.length * 0.05)];
+  }
+}
+const gateDb = () => (settings.autoGate ? Math.max(-65, Math.min(-40, noise.floorDb + 12)) : settings.gateDb);
+const gateRms = () => Math.pow(10, gateDb() / 20);
 function onsetOpts() {
   const s = settings.sens; // 1..5
-  return { thresholdMult: [2.2, 1.9, 1.6, 1.45, 1.3][s - 1], delta: [0.11, 0.07, 0.04, 0.03, 0.02][s - 1], rmsGate: gateRms() * 0.8, minIntervalMs: 70 };
+  const o = { thresholdMult: [2.2, 1.9, 1.6, 1.45, 1.3][s - 1], delta: [0.11, 0.07, 0.04, 0.03, 0.02][s - 1], rmsGate: gateRms() * 0.8, minIntervalMs: 70 };
+  if (settings.outMode === 'speaker') Object.assign(o, SPEAKER_BAND, { delta: o.delta * 1.25 }); // 跳过节拍器“嘀”的频段
+  return o;
 }
 
 // ---------------- 运行状态（提前声明，避免 TDZ） ----------------
@@ -44,7 +57,8 @@ async function enableMic() {
     await engine.startMic();
     $('#mic-bar').classList.add('on');
     $('#mic-btn').textContent = '⏹ 关闭麦克风';
-    $('#mic-status').textContent = `麦克风已开启 · 采样率 ${engine.ctx.sampleRate} Hz`;
+    $('#mic-status').textContent = '麦克风已开启，弹一下弦试试';
+    $('#ob-1').classList.add('done'); $('#ob-mic').textContent = '已开启'; $('#ob-mic').disabled = true;
     $('#set-info').textContent = `采样率 ${engine.ctx.sampleRate} Hz，输出延迟（浏览器报告）≈ ${Math.round(((engine.ctx.outputLatency || 0) + (engine.ctx.baseLatency || 0)) * 1000)} ms，采集方式：${window.AudioWorkletNode ? 'AudioWorklet' : 'ScriptProcessor'}`;
     startLoops();
     return true;
@@ -68,6 +82,7 @@ function disableMic() {
   $('#mic-bar').classList.remove('on');
   $('#mic-btn').textContent = '🎤 开启麦克风';
   $('#mic-status').textContent = '麦克风已关闭';
+  const h = $('#hear'); h.textContent = '未开启'; h.className = 'hear';
 }
 $('#mic-btn').onclick = () => (engine.micOn ? disableMic() : enableMic());
 async function needMic() { return engine.micOn || (await enableMic()); }
@@ -96,6 +111,9 @@ function startLoops() {
   pitchBuf = new Float32Array(N); scratch = new Float32Array(N);
   pitchOnsetDet = new OnsetDetector(sr, onsetOpts());
   engine.onChunk((data, t) => {
+    trackNoise(data);
+    const g = gateRms() * 0.8; // 门限随环境实时更新
+    pitchOnsetDet.gate = g; if (rh.det) rh.det.gate = g; if (cal.det) cal.det.gate = g;
     if (pitchOnsetDet.process(data, t).length) onsetFlag = true;
     rhythmOnChunk(data, t);
     calOnChunk(data, t);
@@ -108,21 +126,43 @@ function startLoops() {
     // 电平表
     const level = rms(pitchBuf, pitchBuf.length - 1024);
     const db = level > 0 ? 20 * Math.log10(level) : -100;
-    $('#meter-fill').style.width = Math.max(0, Math.min(100, ((db + 80) / 80) * 100)) + '%';
+    const fill = $('#meter-fill');
+    fill.style.width = Math.max(0, Math.min(100, ((db + 80) / 80) * 100)) + '%';
+    fill.style.background = db > gateDb() ? 'var(--ok)' : 'var(--muted)';
     if (now - last < 40) return; // ~25 次/秒
     last = now;
-    if (currentTab !== 'tuner' && currentTab !== 'pitch') return;
+    updateMeterGate();
     const r = detectPitch(pitchBuf, sr, { rmsGate: gateRms(), minFreq: 60, maxFreq: 1400, _scratch: scratch });
-    if (r) { pitchHistory.push(r.freq); if (pitchHistory.length > 3) pitchHistory.shift(); }
-    else pitchHistory.length = 0;
-    const f = pitchHistory.length ? median(pitchHistory) : null;
-    if (currentTab === 'tuner') updateTuner(f);
-    else updatePitchPractice(r ? r.freq : null, f);
+    if (r) {
+      // 中值平滑：最近 5 帧；音高突变（>80 音分）时清空，跟得上换音
+      if (pitchHistory.length && Math.abs(centsBetween(r.freq, median(pitchHistory))) > 80) pitchHistory.length = 0;
+      pitchHistory.push(r.freq); if (pitchHistory.length > 5) pitchHistory.shift();
+      held = { f: median(pitchHistory), t: now };
+    } else pitchHistory.length = 0;
+    // 声音消失后保留上一个音 0.8 秒（变暗显示），读数不再一闪就没
+    const live = pitchHistory.length ? median(pitchHistory) : null;
+    const show = live || (held && now - held.t < 800 ? held.f : null);
+    updateHear(db, live);
+    if (currentTab === 'tuner') updateTuner(show, !live);
+    else if (currentTab === 'pitch') updatePitchPractice(r ? r.freq : null, show, !live);
   };
   requestAnimationFrame(tick);
 }
+let held = null, hearState = '';
+function updateHear(db, f) {
+  const h = $('#hear');
+  let txt, cls;
+  if (f) { const n = noteFromFreq(f, settings.a4); txt = '🎸 听到了 ' + n.name + n.octave; cls = 'hear on'; }
+  else if (db > gateDb()) { txt = '🔉 有声音'; cls = 'hear on'; }
+  else { txt = '安静（弹一下）'; cls = 'hear quiet'; }
+  if (txt !== hearState) { h.textContent = txt; h.className = cls; hearState = txt; }
+}
 const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
-function updateMeterGate() { $('#meter-gate').style.left = ((settings.gateDb + 80) / 80) * 100 + '%'; }
+function updateMeterGate() {
+  const g = gateDb();
+  $('#meter-gate').style.left = ((g + 80) / 80) * 100 + '%';
+  if (settings.autoGate) { $('#set-gate').value = Math.round(g); $('#set-gate-val').textContent = `自动 ${Math.round(g)} dB`; }
+}
 
 // ---------------- 调音器 ----------------
 let lockedString = -1; // -1 = 自动
@@ -160,8 +200,9 @@ function setNeedle(cents) {
   n.style.transform = `rotate(${deg}deg)`;
   n.classList.toggle('in', Math.abs(cents) <= 5);
 }
-function updateTuner(f) {
+function updateTuner(f, isHeld = false) {
   const strBtns = $$('#tu-strings button');
+  $('.note-big').classList.toggle('hold', !!f && isHeld);
   if (!f) { $('#tu-verdict').textContent = '弹一根弦试试'; $('#tu-verdict').className = 'verdict'; $('#tu-needle').classList.add('idle'); return; }
   $('#tu-needle').classList.remove('idle');
   let name, oct, cents, nearIdx = -1;
@@ -181,6 +222,7 @@ function updateTuner(f) {
   $('#tu-cents').textContent = (cents > 0 ? '+' : '') + cents.toFixed(1) + ' 音分';
   setNeedle(cents);
   const v = $('#tu-verdict');
+  if (isHeld) { v.textContent = '（上一个音）'; v.className = 'verdict'; return; }
   if (Math.abs(cents) > 300) { v.textContent = '离目标弦太远了（差 ' + Math.round(cents / 100) + ' 个半音）'; v.className = 'verdict bad'; }
   else if (Math.abs(cents) <= 5) { v.textContent = '✓ 准了'; v.className = 'verdict ok'; }
   else if (cents > 0) { v.textContent = '偏高 ↓ 放松一点'; v.className = 'verdict warn'; }
@@ -202,7 +244,7 @@ const SEQS = {
 (function buildPitch() {
   const sel = $('#pp-seq');
   for (const [k, v] of Object.entries(SEQS)) sel.insertAdjacentHTML('beforeend', `<option value="${k}">${v.name}</option>`);
-  sel.value = 'emPent';
+  sel.value = 'open';
   sel.onchange = () => { $('#pp-string-wrap').hidden = !SEQS[sel.value].chromatic; $('#pp-custom-wrap').hidden = !SEQS[sel.value].custom; previewSeq(); };
   ['#pp-dir', '#pp-string', '#pp-custom'].forEach((s) => ($(s).onchange = previewSeq));
   $('#pp-start').onclick = startPitchPractice;
@@ -241,27 +283,30 @@ function renderChips(items, tracker) {
 const fmtC = (c) => (c > 0 ? '+' : '') + Math.round(c);
 async function startPitchPractice() {
   if (!(await needMic())) return;
+  if (pp) return;
   const items = buildTargets();
   if (!items.length) { $('#pp-msg').textContent = '没有可练习的音符，检查一下自定义输入。'; return; }
-  const tol = Math.max(5, Math.min(50, +$('#pp-tol').value || 20));
+  const tol = Math.max(5, Math.min(50, +$('#pp-tol').value || 30));
   pp = {
     items, startedAt: Date.now(), tol,
     tracker: new NoteSequenceTracker(items.map((i) => i.midi), { tolCents: tol, stableFrames: 3, a4: settings.a4, octaveFree: $('#pp-oct').checked, advanceOnMiss: $('#pp-adv').checked }),
   };
   $('#pp-start').disabled = true; $('#pp-stop').disabled = false; $('#pp-result').hidden = true;
   $('#pp-zone').style.left = 50 - (tol / 50) * 50 + '%'; $('#pp-zone').style.width = (tol / 50) * 100 + '%';
-  $('#pp-msg').textContent = '开始！按顺序弹，每个音弹清楚、稍微保持一下。'; $('#pp-msg').className = 'verdict';
+  $('#pp-msg').textContent = '开始！一个音弹清楚、保持半秒'; $('#pp-msg').className = 'feedback';
   showTarget();
 }
 function showTarget() {
   const t = pp.tracker;
   if (t.done) return;
   const it = pp.items[t.idx];
-  $('#pp-target').textContent = midiName(it.midi);
-  $('#pp-pos').textContent = posText(it.pos);
+  $('#pp-target').textContent = midiName(it.midi); $('#pp-target').className = 'huge accent';
+  $('#pp-pos').textContent = posText(it.pos) || ' ';
+  $('#pp-progress').textContent = `第 ${t.idx + 1} / ${t.targets.length} 个音 · 命中 ${t.hits} · 判定 ${t.attempts}`;
   renderChips(pp.items, t);
 }
-function updatePitchPractice(rawFreq, smoothF) {
+function updatePitchPractice(rawFreq, smoothF, isHeld = false) {
+  $('#pp-heard').classList.toggle('dim', !smoothF || isHeld);
   if (!smoothF) { $('#pp-heard').textContent = '—'; $('#pp-dev').textContent = ''; }
   if (!pp) {
     if (smoothF) { const n = noteFromFreq(smoothF, settings.a4); $('#pp-heard').textContent = n.name + n.octave; $('#pp-dev').textContent = fmtC(n.cents) + ' 音分'; }
@@ -282,9 +327,10 @@ function updatePitchPractice(rawFreq, smoothF) {
   const ev = t.update({ freq: rawFreq, time: performance.now(), onset });
   if (ev) {
     const m = $('#pp-msg');
-    if (ev.type === 'hit') { m.textContent = `✓ ${midiName(ev.target)} 命中（${fmtC(ev.cents)} 音分）`; m.className = 'verdict ok'; }
-    else if (Math.abs(ev.cents) < 100) { m.textContent = `✗ 音准不够：${fmtC(ev.cents)} 音分（容差 ±${pp.tol}）${t.advanceOnMiss ? '' : '，再弹一次'}`; m.className = 'verdict warn'; }
-    else { m.textContent = `✗ 弹成了 ${midiName(ev.playedMidi)}，目标是 ${midiName(ev.target)}${t.advanceOnMiss ? '' : '，再弹一次'}`; m.className = 'verdict bad'; }
+    if (ev.type === 'hit') { m.textContent = `✓ 命中 ${midiName(ev.target)}  ${fmtC(ev.cents)} 音分`; m.className = 'feedback ok'; }
+    else if (Math.abs(ev.cents) < 100) { m.textContent = `✗ ${ev.cents > 0 ? '偏高' : '偏低'} ${Math.abs(Math.round(ev.cents))} 音分${t.advanceOnMiss ? '' : ' · 再来'}`; m.className = 'feedback warn'; }
+    else { m.textContent = `✗ 弹成了 ${midiName(ev.playedMidi)}${t.advanceOnMiss ? '' : ' · 再来'}`; m.className = 'feedback bad'; }
+    void m.offsetWidth; m.classList.add('pop');
     if (t.done) stopPitchPractice(true); else showTarget();
   }
 }
@@ -323,12 +369,22 @@ const stat = (v, label) => `<div class="stat"><b>${v}</b><span>${label}</span></
 // ---------------- 节奏练习 ----------------
 (function buildRhythm() {
   const bpm = $('#rh-bpm');
-  bpm.oninput = () => { $('#rh-bpm-val').textContent = bpm.value; metro.bpm = +bpm.value; };
-  $('#rh-beats').onchange = () => { metro.beatsPerBar = +$('#rh-beats').value; buildBeatDots(); };
-  $('#rh-sub').onchange = () => (metro.subdiv = +$('#rh-sub').value);
-  $('#rh-sound').onchange = () => (metro.sound = $('#rh-sound').checked);
+  const setBpm = (v) => {
+    v = Math.max(30, Math.min(240, Math.round(v)));
+    bpm.value = v; $('#rh-bpm-val').textContent = v;
+    if (!rh.active) metro.set({ bpm: v });
+  };
+  bpm.oninput = () => setBpm(+bpm.value);
+  $$('[data-bpm]').forEach((b) => (b.onclick = () => { const d = b.dataset.bpm; setBpm(/^[+-]/.test(d) ? +bpm.value + +d : +d); }));
+  $('#rh-beats').onchange = () => { if (!rh.active) metro.set({ beatsPerBar: +$('#rh-beats').value }); buildBeatDots(); };
+  $('#rh-sub').onchange = () => { if (!rh.active) metro.set({ subdiv: +$('#rh-sub').value }); };
+  $('#rh-out').value = settings.outMode;
+  $('#rh-out').onchange = () => setOutMode($('#rh-out').value);
+  $('#rh-vol').value = Math.round(settings.volume * 100); $('#rh-vol-val').textContent = $('#rh-vol').value + '%';
+  $('#rh-vol').oninput = () => { settings.volume = +$('#rh-vol').value / 100; metro.volume = settings.volume; $('#rh-vol-val').textContent = $('#rh-vol').value + '%'; saveSettings(); };
   $('#rh-accent').onchange = () => (metro.accent = $('#rh-accent').checked);
   $('#rh-metro').onclick = toggleMetroOnly;
+  $('#rh-test').onclick = () => testClick();
   $('#rh-start').onclick = startRhythm;
   $('#rh-stop').onclick = () => stopRhythm(true);
   buildBeatDots(); drawRhythm();
@@ -339,10 +395,23 @@ function buildBeatDots() {
 }
 function readMetroSettings() {
   metro.bpm = +$('#rh-bpm').value; metro.beatsPerBar = +$('#rh-beats').value; metro.subdiv = +$('#rh-sub').value;
-  metro.sound = $('#rh-sound').checked; metro.accent = $('#rh-accent').checked;
+  metro.sound = settings.outMode !== 'silent'; metro.accent = $('#rh-accent').checked; metro.volume = settings.volume;
+}
+function setOutMode(m) {
+  settings.outMode = m; saveSettings();
+  $('#rh-out').value = m;
+  const r = document.querySelector(`input[name=ob-out][value=${m === 'silent' ? 'speaker' : m}]`); if (r) r.checked = true;
+  metro.sound = m !== 'silent';
+  if (pitchOnsetDet) pitchOnsetDet = new OnsetDetector(engine.ctx.sampleRate, onsetOpts());
+}
+async function testClick() {
+  readMetroSettings();
+  await metro.test();
+  if (engine.ctx.state !== 'running') alert('浏览器还没允许播放声音，请再点一次「试听」。');
 }
 function flashAt(time, info) {
-  const delay = Math.max(0, (time - engine.ctx.currentTime) * 1000);
+  const outLat = (engine.ctx.outputLatency || 0) + (engine.ctx.baseLatency || 0);
+  const delay = Math.max(0, (time + outLat - engine.ctx.currentTime) * 1000); // 让闪光和听到的声音对齐
   setTimeout(() => {
     if (info.sub !== 0) return;
     const dots = $$('#rh-beats-vis span');
@@ -350,18 +419,21 @@ function flashAt(time, info) {
     setTimeout(() => dots[info.beat] && dots[info.beat].classList.remove('flash'), 110);
   }, delay);
 }
-function toggleMetroOnly() {
+async function toggleMetroOnly() {
   if (rh.active) return;
   if (metro.running) { metro.stop(); $('#rh-metro').textContent = '▶ 只开节拍器'; return; }
   readMetroSettings();
+  await engine.unlock();
   metro.onTick = flashAt;
   metro.start();
   $('#rh-metro').textContent = '⏸ 停止节拍器';
 }
 async function startRhythm() {
+  if (rh.active || cal.active) return;
   if (!(await needMic())) return;
   if (metro.running) { metro.stop(); $('#rh-metro').textContent = '▶ 只开节拍器'; }
   readMetroSettings();
+  await engine.unlock();
   const perBar = metro.beatsPerBar * metro.subdiv, bars = +$('#rh-bars').value;
   const countInTicks = perBar, total = perBar * bars;
   Object.assign(rh, { active: true, expected: [], onsets: [], liveErrs: [], countInOnsets: 0, total, countInTicks,
@@ -376,13 +448,18 @@ async function startRhythm() {
     if (info.index >= countInTicks + total) metro.stop();
   };
   $('#rh-start').disabled = true; $('#rh-stop').disabled = false; $('#rh-metro').disabled = true; $('#rh-result').hidden = true;
-  $('#rh-last').textContent = '—';
+  $('#rh-last').textContent = '—'; $('#rh-last').className = 'huge'; $('#rh-last-grade').textContent = ' ';
   rh.timer = setInterval(() => {
     const now = engine.ctx.currentTime;
-    if (now < rh.countInEnd) $('#rh-state').textContent = '预备 ' + (Math.floor((now - start) / (iv * metro.subdiv)) + 1 || 1);
-    else if (now < rh.endTime) {
-      const k = Math.min(total, Math.floor((now - rh.countInEnd) / iv) + 1);
-      $('#rh-state').textContent = `第 ${Math.ceil(k / perBar)}/${bars} 小节`;
+    const st = $('#rh-state'), sub = $('#rh-sub-state');
+    if (now < start) { st.textContent = '准备'; st.className = 'huge'; }
+    else if (now < rh.countInEnd) {
+      const b = Math.floor((now - start) / (iv * metro.subdiv));
+      st.textContent = String(metro.beatsPerBar - b); st.className = 'huge warn'; sub.textContent = '预备拍，下一小节开始弹';
+    } else if (now < rh.endTime) {
+      const k = Math.min(total - 1, Math.floor((now - rh.countInEnd) / iv));
+      st.textContent = `${Math.floor(k / perBar) + 1} / ${bars}`; st.className = 'huge accent';
+      sub.textContent = `小节 · 第 ${Math.floor((k % perBar) / metro.subdiv) + 1} 拍`;
     }
     // 等采集数据追上结束时间再结算
     if (engine.lastFrameTime > rh.endTime + 0.1) stopRhythm(true);
@@ -402,9 +479,18 @@ function rhythmOnChunk(data, t) {
     for (const e of rh.expected) if (!best || Math.abs(adj - e) < Math.abs(adj - best)) best = e;
     const err = (adj - best) * 1000;
     const idx = rh.expected.indexOf(best);
+    const win = Math.min(150, (metro.tickInterval * 1000) / 2);
+    if (Math.abs(err) > win) { // 离拍太远：不画点，提示一下
+      const el = $('#rh-last'); el.textContent = '没对上'; el.className = 'huge bad';
+      $('#rh-last-grade').textContent = `离最近的拍 ${Math.abs(Math.round(err))} ms`;
+      continue;
+    }
     rh.liveErrs.push({ idx, err });
-    const g = gradeOf(err), label = { perfect: '完美', good: '好', ok: '一般', off: '偏差大' }[g];
-    $('#rh-last').textContent = `${Math.abs(err) < 3 ? '正好' : err < 0 ? '早' : '晚'} ${Math.abs(Math.round(err))}ms · ${label}`;
+    const g = gradeOf(err), label = { perfect: '完美 Perfect', good: '好 Good', ok: '一般 OK', off: '偏差大 Off' }[g];
+    const el = $('#rh-last');
+    el.textContent = Math.abs(err) < 5 ? '正好' : `${err < 0 ? '早' : '晚'} ${Math.abs(Math.round(err))}ms`;
+    el.className = 'huge ' + ({ perfect: 'ok', good: 'accent', ok: 'warn', off: 'bad' }[g]);
+    $('#rh-last-grade').textContent = label;
     drawRhythm();
   }
 }
@@ -412,7 +498,7 @@ function stopRhythm(save) {
   if (!rh.active) return;
   rh.active = false; metro.stop(); clearInterval(rh.timer);
   $('#rh-start').disabled = false; $('#rh-stop').disabled = true; $('#rh-metro').disabled = false;
-  $('#rh-state').textContent = '已结束';
+  $('#rh-state').textContent = '结束'; $('#rh-state').className = 'huge'; $('#rh-sub-state').textContent = '结果在下面';
   const now = engine.ctx ? engine.ctx.currentTime : 0;
   // 提前停止时只统计已经过去的拍点
   const expected = rh.expected.filter((e) => e <= Math.min(now, engine.lastFrameTime) - 0.05);
@@ -424,6 +510,7 @@ function stopRhythm(save) {
   const st = rh.settings;
   const desc = `${st.bpm} BPM · ${st.beats} 拍 · ${['', '四分', '八分', '三连音', '十六分'][st.subdiv]} · ${st.bars} 小节`;
   const bleed = rh.countInOnsets >= Math.max(2, rh.countInTicks * 0.75) && metro.sound;
+  setTimeout(() => $('#rh-result').scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
   const res = $('#rh-result'); res.hidden = false;
   res.innerHTML = `<h3>节奏结果 · ${desc}</h3>
     <div class="stats">
@@ -438,7 +525,7 @@ function stopRhythm(save) {
     </div>
     <p class="small">评级：完美 ≤20ms ${s.grades.perfect} · 好 ≤45ms ${s.grades.good} · 一般 ≤90ms ${s.grades.ok} · 偏差大 ${s.grades.off}</p>
     <p class="small muted">${adviceRhythm(s)}</p>
-    ${bleed ? '<p class="small" style="color:var(--bad)">⚠ 预备拍期间也检测到了很多“拨弦”，可能是麦克风收到了节拍器的声音。请戴耳机，或关掉「节拍器出声」。</p>' : ''}`;
+    ${bleed ? `<p class="small" style="color:var(--bad)">⚠ 预备拍期间也检测到了很多“拨弦”，可能是麦克风收到了节拍器的声音${settings.outMode === 'headphones' ? '。如果你没戴耳机，请把输出方式改成「外放」' : '，或者环境太吵。试试调低节拍器音量或起音灵敏度'}。</p>` : ''}`;
   addHistory({ type: 'rhythm', at: new Date().toISOString(), name: desc, ...st, latencyMs: settings.latencyMs, ...s, grades: s.grades });
 }
 function adviceRhythm(s) {
@@ -472,29 +559,39 @@ function drawRhythm(match) {
 }
 
 // ---------------- 延迟校准 ----------------
-$('#cal-start').onclick = async () => {
-  if (cal.active || rh.active) return;
-  if (!(await needMic())) return;
-  if (metro.running) metro.stop();
+async function runCalibration(statusEl) {
+  if (cal.active || rh.active) return false;
+  if (!(await needMic())) return false;
+  if (metro.running) { metro.stop(); $('#rh-metro').textContent = '▶ 只开节拍器'; }
+  await engine.unlock();
   const saved = { bpm: metro.bpm, beatsPerBar: metro.beatsPerBar, subdiv: metro.subdiv, sound: metro.sound };
-  Object.assign(metro, { bpm: 80, beatsPerBar: 4, subdiv: 1, sound: true });
+  Object.assign(metro, { bpm: 80, beatsPerBar: 4, subdiv: 1, sound: true, volume: settings.volume });
   const start = metro.start(0.3), iv = metro.tickInterval;
   Object.assign(cal, { active: true, det: new OnsetDetector(engine.ctx.sampleRate, onsetOpts()), onsets: [], expected: [] });
   for (let i = 4; i < 16; i++) cal.expected.push(start + i * iv);
   cal.end = start + 16 * iv + 0.3;
-  metro.onTick = (time, info) => { flashAt(time, info); if (info.index >= 15) metro.stop(); };
-  $('#cal-status').textContent = '听 4 下预备拍，然后跟着拍子拨闷音（或者外放不弹）…';
-  const timer = setInterval(() => {
-    if (engine.lastFrameTime < cal.end) return;
-    clearInterval(timer); cal.active = false;
-    Object.assign(metro, saved);
-    const est = estimateLatency(cal.onsets.filter((o) => o > cal.expected[0] - 0.3), cal.expected, 300);
-    if (!est || est.n < 6) { $('#cal-status').textContent = `只检测到 ${est ? est.n : cal.onsets.length} 下，不够可靠，请再试一次（弹响一点或调低噪声门限）。`; return; }
-    if (est.spreadMs > 40) { $('#cal-status').textContent = `测得的拨弦时间太分散（±${est.spreadMs.toFixed(0)} ms），没有采用。请跟紧拍子再测一次。`; return; }
-    settings.latencyMs = Math.round(est.latencyMs); saveSettings(); syncSettingsUI();
-    $('#cal-status').textContent = `校准完成：延迟 ${settings.latencyMs} ms（${est.n} 下，离散 ±${est.spreadMs.toFixed(0)} ms）${est.spreadMs > 20 ? '。离散偏大，建议再测一次。' : ''}`;
-  }, 100);
-};
+  metro.onTick = (time, info) => {
+    flashAt(time, info);
+    if (info.index >= 15) metro.stop();
+    const left = 15 - info.index;
+    setTimeout(() => { if (cal.active) statusEl.textContent = info.index < 4 ? `预备 ${4 - info.index}…` : `跟着拨！还剩 ${left} 下`; }, Math.max(0, (time - engine.ctx.currentTime) * 1000));
+  };
+  statusEl.textContent = '听 4 下预备拍，然后跟着拍子拨闷音…';
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      if (engine.lastFrameTime < cal.end) return;
+      clearInterval(timer); cal.active = false;
+      Object.assign(metro, saved);
+      const est = estimateLatency(cal.onsets.filter((o) => o > cal.expected[0] - 0.3), cal.expected, 300);
+      if (!est || est.n < 6) { statusEl.textContent = `只检测到 ${est ? est.n : cal.onsets.length} 下，不够可靠。弹响一点再试（电平条要变绿）。`; return resolve(false); }
+      if (est.spreadMs > 40) { statusEl.textContent = `拨弦时间太分散（±${est.spreadMs.toFixed(0)} ms），没有采用。请跟紧拍子再测一次。`; return resolve(false); }
+      settings.latencyMs = Math.round(est.latencyMs); saveSettings(); syncSettingsUI();
+      statusEl.textContent = `✓ 校准完成：延迟 ${settings.latencyMs} ms（${est.n} 下，离散 ±${est.spreadMs.toFixed(0)} ms）${est.spreadMs > 20 ? '。离散偏大，可以再测一次。' : ''}`;
+      resolve(true);
+    }, 100);
+  });
+}
+$('#cal-start').onclick = () => runCalibration($('#cal-status'));
 function calOnChunk(data, t) { if (cal.active) cal.onsets.push(...cal.det.process(data, t)); }
 
 // ---------------- 记录 ----------------
@@ -541,15 +638,35 @@ $('#hi-export').onclick = () => {
 // ---------------- 设置 UI ----------------
 function syncSettingsUI() {
   $('#set-a4').value = settings.a4; $('#set-gate').value = settings.gateDb; $('#set-lat').value = settings.latencyMs; $('#set-sens').value = settings.sens;
-  $('#set-gate-val').textContent = settings.gateDb + ' dB';
+  $('#set-gate-val').textContent = settings.autoGate ? `自动 ${Math.round(gateDb())} dB` : settings.gateDb + ' dB';
+  $('#set-gate').disabled = settings.autoGate; $('#set-auto').checked = settings.autoGate;
+  $('#rh-lat-warn').innerHTML = settings.latencyMs === 0 ? ' · <b>还没校准</b>，结果可能整体偏晚，去「设置」校准' : '';
   $('#set-sens-val').textContent = ['很低', '低', '中', '高', '很高'][settings.sens - 1];
   $('#rh-lat').textContent = settings.latencyMs;
   updateMeterGate();
 }
 $('#set-a4').onchange = (e) => { settings.a4 = Math.max(415, Math.min(466, +e.target.value || 440)); saveSettings(); syncSettingsUI(); };
 $('#set-gate').oninput = (e) => { settings.gateDb = +e.target.value; saveSettings(); syncSettingsUI(); };
+$('#set-auto').onchange = (e) => { settings.autoGate = e.target.checked; if (!settings.autoGate) settings.gateDb = Math.round(gateDb()); saveSettings(); syncSettingsUI(); };
 $('#set-sens').oninput = (e) => { settings.sens = +e.target.value; saveSettings(); syncSettingsUI(); if (pitchOnsetDet) pitchOnsetDet = new OnsetDetector(engine.ctx.sampleRate, onsetOpts()); };
 $('#set-lat').onchange = (e) => { settings.latencyMs = Math.round(+e.target.value || 0); saveSettings(); syncSettingsUI(); };
+// ---------------- 三步开始 ----------------
+function showOnboard(v) { $('#onboard').hidden = !v; }
+$('#ob-close').onclick = () => { settings.onboardDone = true; saveSettings(); showOnboard(false); };
+$('#ob-reopen').onclick = () => { showOnboard(true); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+$('#ob-mic').onclick = () => enableMic();
+$$('input[name=ob-out]').forEach((r) => (r.onchange = () => setOutMode(r.value)));
+$('#ob-click').onclick = async () => { await testClick(); $('#ob-2').classList.add('done'); };
+$('#ob-cal').onclick = async () => {
+  $('#ob-cal').disabled = true;
+  const ok = await runCalibration($('#ob-cal-status'));
+  $('#ob-cal').disabled = false;
+  if (ok) { $('#ob-3').classList.add('done'); settings.onboardDone = true; saveSettings(); $('#ob-cal').textContent = '重新校准'; }
+};
+{ const r = document.querySelector(`input[name=ob-out][value=${settings.outMode === 'headphones' ? 'headphones' : 'speaker'}]`); if (r) r.checked = true; }
+metro.volume = settings.volume;
+showOnboard(!settings.onboardDone);
+
 syncSettingsUI();
 renderHistory();
 document.addEventListener('visibilitychange', () => { if (document.hidden && rh.active) stopRhythm(true); });
