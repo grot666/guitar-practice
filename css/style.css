@@ -334,3 +334,4 @@ input[type=range]:disabled { opacity: .45; }
 }
 
 .drawer:not(.open) { visibility: hidden; transition: transform .25s ease, visibility 0s linear .25s; }
+.sound-banner { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; border: 0; border-radius: 999px; padding: .8rem 1.3rem; background: var(--warn); color: #1a1405; font-weight: 800; font-size: 1rem; box-shadow: var(--shadow); cursor: pointer; max-width: 92vw; }

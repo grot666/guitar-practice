@@ -21,6 +21,7 @@
   <button id="open-settings" class="icon-btn" aria-label="设置"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
 </header>
 <div id="toast" class="toast" hidden></div>
+<button id="sound-banner" class="sound-banner" hidden>🔇 声音被浏览器暂停了，点一下开启</button>
 
 <main id="main">
   <!-- 首页 -->
@@ -247,8 +248,9 @@
       </div>
       <p class="hint" id="s-out-hint"></p>
       <label class="slider"><span>节拍器音量 <b id="s-vol-v">—</b></span><input id="s-vol" type="range" min="0" max="100"></label>
-      <div class="row"><button id="s-click" class="btn">🔊 试听节拍器</button><button id="s-ref" class="btn">参考音 A4</button></div>
-      <p class="hint">听不到？调大系统音量；iPhone 关掉侧面静音拨片；蓝牙耳机可能延迟很大。</p>
+      <div class="row wrap"><button id="s-sound" class="btn primary">🔈 测试声音</button><button id="s-click" class="btn">🔊 试听节拍器</button><button id="s-ref" class="btn">参考音 A4</button></div>
+      <p class="hint" id="s-sound-info"></p>
+      <p class="hint">听不到？① 调大媒体音量（按音量键时看是不是「媒体」音量）；② 老款 iPhone（iOS 16 及以下）关掉侧面静音拨片；③ 只播放时先关掉麦克风——开着麦克风时 iPhone 会从听筒出声；④ 微信等 App 内置浏览器有时不出声，请用 Safari / Chrome 打开。</p>
     </section>
 
     <section class="ds">
