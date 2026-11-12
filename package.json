@@ -2,5 +2,5 @@
   "name": "guitar-practice",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/dsp.test.mjs && node tests/songs.test.mjs" }
+  "scripts": { "test": "node tests/dsp.test.mjs && node tests/songs.test.mjs && node tests/harmony.test.mjs" }
 }
