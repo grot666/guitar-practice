@@ -43,3 +43,16 @@ export function markBoard(svg, cur, next, label = true) {
   }
   g.innerHTML = s;
 }
+
+/** 标出一个和弦按法，shape 为 6 弦 → 1 弦，例如 'x32010'；x = 不弹，0 = 空弦 */
+export function markShape(svg, shape) {
+  const g = svg.querySelector('.fb-marks'); if (!g) return;
+  let s = '';
+  [...shape].forEach((ch, i) => {
+    const st = 6 - i;
+    if (ch === 'x') s += `<text class="fb-x" x="${fx(0)}" y="${sy(st) + 3.5}">×</text>`;
+    else if (ch === '0') s += `<circle class="fb-dot open" cx="${fx(0)}" cy="${sy(st)}" r="6"/>`;
+    else s += `<circle class="fb-dot" cx="${fx(+ch)}" cy="${sy(st)}" r="7"/>`;
+  });
+  g.innerHTML = s;
+}

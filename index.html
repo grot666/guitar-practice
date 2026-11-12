@@ -39,6 +39,7 @@
       <a class="mode accent" href="#songs"><span class="mode-ic">♪</span><b>练曲子</b><small>小星星、欢乐颂、生日歌…</small></a>
       <a class="mode" href="#frets"><span class="mode-ic">▦</span><b>认识指板</b><small>空弦和第一把位的音</small></a>
       <a class="mode" href="#rhythm"><span class="mode-ic">◔</span><b>节奏</b><small>节拍器 · 测早晚</small></a>
+      <a class="mode wide" href="#arrange"><span class="mode-ic">♫</span><b>编曲入门</b><small>旋律、和弦、低音、节奏——一层一层叠起来听</small></a>
     </div>
     <div class="section-h"><h2>最近练习</h2><a href="#" id="hist-more" class="link small">全部</a></div>
     <div id="recent" class="list"></div>
@@ -155,6 +156,32 @@
       <button id="rh-test" class="btn primary block">开始测</button>
       <div id="rh-result"></div>
     </div>
+  </section>
+
+  <!-- 编曲入门 -->
+  <section id="v-arrange" class="view" hidden>
+    <div class="ar-head">
+      <select id="ar-song" aria-label="选曲"></select>
+      <span id="ar-key" class="pill"></span>
+    </div>
+    <div id="ar-steps" class="steps" role="tablist"></div>
+    <div class="card lesson">
+      <div class="lesson-h"><span id="ar-l-n" class="lesson-n">1</span><h2 id="ar-l-title"></h2></div>
+      <p id="ar-l-text" class="muted"></p>
+      <div id="ar-l-ctl" class="lesson-ctl"></div>
+    </div>
+    <div id="ar-grid" class="ar-grid"></div>
+    <div class="ar-legend small muted"><span><i class="lg ct"></i>和弦内音</span><span><i class="lg nct"></i>不在和弦里</span><span><i class="lg hi"></i>合适</span><span><i class="lg mid"></i>还行</span><span><i class="lg lo"></i>冲突</span><span id="ar-fit"></span></div>
+    <div class="ar-transport">
+      <button id="ar-play" class="btn primary">▶ 播放</button>
+      <div id="ar-layers" class="chips"></div>
+      <label class="tempo"><span>速度 <b id="ar-bpm">90</b></span><input id="ar-tempo" type="range" min="50" max="160" value="90"></label>
+    </div>
+    <div class="row">
+      <button id="ar-export" class="btn ghost">导出和弦谱</button>
+      <button id="ar-reset" class="btn ghost">恢复参考和弦</button>
+    </div>
+    <pre id="ar-chart" class="chart" hidden></pre>
   </section>
 
   <!-- 记录 -->

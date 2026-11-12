@@ -6,6 +6,7 @@ import { midiToFreq, midiName, noteFromFreq, centsBetween, matchOnsets, summariz
 import { drawBoard } from './fretboard.js';
 import { openPractice, closePractice } from './practice.js';
 import { openDrawer, initDrawer } from './drawer.js';
+import { openArrange, closeArrange } from './arrange.js';
 
 applyTheme();
 initDrawer();
@@ -34,7 +35,7 @@ $('#mic-chip').onclick = async () => { if (engine.micOn) disableMic(); else { aw
 })();
 
 // ---------- 路由 ----------
-const TITLES = { home: '吉他练习', tuner: '调音', songs: '练曲子', frets: '认识指板', rhythm: '节奏', history: '练习记录', play: '练习' };
+const TITLES = { home: '吉他练习', tuner: '调音', songs: '练曲子', frets: '认识指板', rhythm: '节奏', history: '练习记录', play: '练习', arrange: '编曲入门' };
 let curView = '';
 let drill = null;
 function route() {
@@ -42,6 +43,7 @@ function route() {
   const view = TITLES[name] ? name : 'home';
   if (curView === 'play' && view !== 'play') closePractice();
   if (curView === 'rhythm' && view !== 'rhythm') stopRhythmAll();
+  if (curView === 'arrange' && view !== 'arrange') closeArrange();
   $$('.view').forEach((v) => (v.hidden = v.id !== 'v-' + view));
   $('#result').hidden = true;
   curView = view;
@@ -51,6 +53,7 @@ function route() {
   if (view === 'home') renderHome();
   if (view === 'songs') renderSongs();
   if (view === 'history') renderHistory();
+  if (view === 'arrange') openArrange();
   if (view === 'play') {
     if (arg === 'drill') { if (!drill) drill = makeDrillFromUI(); openPractice(drill.song, { drill: true, names: drill.names, onDone: () => { drill = makeDrillFromUI(); } }); }
     else {
