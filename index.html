@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>吉他练习 · Guitar Practice</title>
+<meta name="description" content="纯前端吉他练习工具：调音器、音准练习、节奏练习（节拍器 + 起音检测），数据只存在本机。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎸</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <a class="home" href="https://grot666.github.io/" title="返回 CIRCUIT 回路">← 回路</a>
+    <h1>吉他练习 <small>Guitar Practice</small></h1>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="tuner" class="active">调音<small>Tuner</small></button>
+    <button role="tab" data-tab="pitch">音准<small>Pitch</small></button>
+    <button role="tab" data-tab="rhythm">节奏<small>Rhythm</small></button>
+    <button role="tab" data-tab="history">记录<small>History</small></button>
+    <button role="tab" data-tab="settings">设置<small>Settings</small></button>
+  </nav>
+</header>
+
+<section id="mic-bar" class="mic-bar">
+  <button id="mic-btn" class="primary">🎤 开启麦克风</button>
+  <div class="meter" title="输入电平"><div id="meter-fill"></div><div id="meter-gate"></div></div>
+  <span id="mic-status" class="muted">麦克风未开启。所有声音只在你的浏览器里分析，不会上传。</span>
+</section>
+<div id="mic-error" class="alert" hidden></div>
+
+<main>
+  <!-- 调音器 -->
+  <section id="tab-tuner" class="panel active">
+    <div class="card tuner">
+      <div class="note-big"><span id="tu-note">—</span><sub id="tu-oct"></sub></div>
+      <div class="freq" id="tu-freq">— Hz</div>
+      <svg class="gauge" viewBox="-110 -100 220 115" aria-hidden="true">
+        <path d="M -90 0 A 90 90 0 0 1 90 0" class="arc"/>
+        <path id="tu-zone" d="" class="zone"/>
+        <g id="tu-ticks"></g>
+        <line id="tu-needle" x1="0" y1="0" x2="0" y2="-82" class="needle idle"/>
+        <circle r="5" class="hub"/>
+      </svg>
+      <div class="cents" id="tu-cents">0 音分</div>
+      <div class="verdict" id="tu-verdict">弹一根弦试试</div>
+    </div>
+    <div class="card">
+      <div class="row wrap strings" id="tu-strings"></div>
+      <p class="muted small">标准调弦 EADGBE（6→1 弦）。点一根弦可锁定目标；选「自动」则显示最近的音。</p>
+    </div>
+  </section>
+
+  <!-- 音准练习 -->
+  <section id="tab-pitch" class="panel">
+    <div class="card">
+      <div class="grid2">
+        <label>练习内容
+          <select id="pp-seq"></select>
+        </label>
+        <label>方向
+          <select id="pp-dir">
+            <option value="up">上行</option>
+            <option value="updown">上行 + 下行</option>
+            <option value="random">随机顺序</option>
+          </select>
+        </label>
+        <label id="pp-string-wrap" hidden>弦
+          <select id="pp-string">
+            <option value="0">6 弦 E</option><option value="1">5 弦 A</option><option value="2">4 弦 D</option>
+            <option value="3">3 弦 G</option><option value="4">2 弦 B</option><option value="5">1 弦 E</option>
+          </select>
+        </label>
+        <label>容差 ±音分
+          <input id="pp-tol" type="number" min="5" max="50" step="1" value="20">
+        </label>
+        <label class="check"><input id="pp-oct" type="checkbox" checked> 允许八度不同</label>
+        <label class="check"><input id="pp-adv" type="checkbox"> 弹错也前进</label>
+      </div>
+      <label id="pp-custom-wrap" hidden>自定义音符（空格分隔，如 <code>E2 G2 A2 B2 D3</code>）
+        <input id="pp-custom" type="text" value="E2 G2 A2 B2 D3 E3">
+      </label>
+      <div class="row">
+        <button id="pp-start" class="primary">开始练习</button>
+        <button id="pp-stop" disabled>结束</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="target-line">
+        <div>目标 <span id="pp-target" class="big">—</span> <span id="pp-pos" class="muted"></span></div>
+        <div>听到 <span id="pp-heard" class="big">—</span> <span id="pp-dev" class="muted"></span></div>
+      </div>
+      <div class="bar-gauge"><div class="bar-zone" id="pp-zone"></div><div class="bar-needle" id="pp-needle"></div></div>
+      <div id="pp-chips" class="chips"></div>
+      <div id="pp-msg" class="verdict"></div>
+    </div>
+    <div id="pp-result" class="card result" hidden></div>
+  </section>
+
+  <!-- 节奏练习 -->
+  <section id="tab-rhythm" class="panel">
+    <div class="card">
+      <div class="grid2">
+        <label>速度 BPM <span id="rh-bpm-val" class="pill">80</span>
+          <input id="rh-bpm" type="range" min="30" max="240" value="80">
+        </label>
+        <label>拍号
+          <select id="rh-beats">
+            <option value="2">2/4</option><option value="3">3/4</option><option value="4" selected>4/4</option>
+            <option value="5">5/4</option><option value="6">6/8（6 拍）</option>
+          </select>
+        </label>
+        <label>细分（每拍弹几下）
+          <select id="rh-sub">
+            <option value="1">四分音符 ×1</option><option value="2">八分音符 ×2</option>
+            <option value="3">三连音 ×3</option><option value="4">十六分音符 ×4</option>
+          </select>
+        </label>
+        <label>小节数
+          <select id="rh-bars"><option>2</option><option selected>4</option><option>8</option><option>16</option></select>
+        </label>
+        <label class="check"><input id="rh-sound" type="checkbox" checked> 节拍器出声</label>
+        <label class="check"><input id="rh-accent" type="checkbox" checked> 重拍提示</label>
+      </div>
+      <div class="row">
+        <button id="rh-metro">▶ 只开节拍器</button>
+        <button id="rh-start" class="primary">开始测节奏</button>
+        <button id="rh-stop" disabled>停止</button>
+      </div>
+      <p class="muted small">先数 1 小节预备拍，然后按每个细分点拨弦（闷音也可以）。<b>请戴耳机</b>，否则麦克风会把节拍器的声音也当成你的拨弦；没有耳机时可以关掉「节拍器出声」，只看闪光。当前延迟补偿：<span id="rh-lat">0</span> ms（在「设置」里校准）。</p>
+    </div>
+    <div class="card">
+      <div class="beats" id="rh-beats-vis"></div>
+      <div class="live-row">
+        <div>状态 <span id="rh-state" class="big">待开始</span></div>
+        <div>上一下 <span id="rh-last" class="big">—</span></div>
+      </div>
+      <canvas id="rh-canvas" height="160"></canvas>
+      <p class="muted small">图：每个点是一下拨弦；横轴是拍点顺序，纵轴是偏差（上 = 晚，下 = 早），灰带为 ±20 ms。</p>
+    </div>
+    <div id="rh-result" class="card result" hidden></div>
+  </section>
+
+  <!-- 记录 -->
+  <section id="tab-history" class="panel">
+    <div class="card">
+      <div class="row between">
+        <h2>练习记录</h2>
+        <div class="row">
+          <button id="hi-export">导出 JSON</button>
+          <button id="hi-clear" class="danger">清空</button>
+        </div>
+      </div>
+      <canvas id="hi-chart" height="140"></canvas>
+      <p class="muted small">折线：最近 30 次的得分（蓝 = 节奏准确率，橙 = 音准命中率）。记录只保存在这个浏览器的 localStorage。</p>
+      <div id="hi-list"></div>
+    </div>
+  </section>
+
+  <!-- 设置 -->
+  <section id="tab-settings" class="panel">
+    <div class="card">
+      <h2>延迟校准 Latency</h2>
+      <p class="small">麦克风和耳机都有延迟，浏览器无法准确知道总延迟。校准会响 4 下预备拍 + 12 下 80 BPM 的拍子，请<b>跟着拍子拨闷音</b>（戴耳机，推荐），或者<b>外放且不弹</b>让麦克风直接听节拍器（只测硬件延迟）。取中位数作为补偿。</p>
+      <div class="row">
+        <button id="cal-start" class="primary">开始校准</button>
+        <span id="cal-status" class="muted"></span>
+      </div>
+      <label>延迟补偿（ms，可手动改）
+        <input id="set-lat" type="number" step="1" value="0">
+      </label>
+    </div>
+    <div class="card">
+      <h2>音频</h2>
+      <div class="grid2">
+        <label>标准音 A4 (Hz)
+          <input id="set-a4" type="number" min="415" max="466" step="0.5" value="440">
+        </label>
+        <label>噪声门限 <span id="set-gate-val" class="pill">-50 dB</span>
+          <input id="set-gate" type="range" min="-75" max="-20" value="-50">
+        </label>
+        <label>起音灵敏度 <span id="set-sens-val" class="pill">中</span>
+          <input id="set-sens" type="range" min="1" max="5" value="3">
+        </label>
+      </div>
+      <p class="muted small">环境吵或误报多：调高噪声门限、调低灵敏度。弹得轻检测不到：反过来调。电平条上的竖线就是门限位置。</p>
+      <p class="muted small" id="set-info"></p>
+    </div>
+    <div class="card">
+      <h2>说明</h2>
+      <ul class="small">
+        <li>只识别<b>单音</b>的音高；和弦/扫弦不判断音高，但节奏模式里扫弦能正常计为一下。</li>
+        <li>所有处理都在本机浏览器里完成，不上传任何声音；记录存在 localStorage。</li>
+        <li>源代码：<a href="https://github.com/grot666/guitar-practice">github.com/grot666/guitar-practice</a></li>
+      </ul>
+    </div>
+  </section>
+</main>
+<footer class="muted small">CIRCUIT 回路 · <a href="https://grot666.github.io/">grot666.github.io</a></footer>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
