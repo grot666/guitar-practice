@@ -1,4 +1,5 @@
 // audio.js — 麦克风采集与节拍器（Web Audio API）
+import { CLICK } from './dsp.js';
 export class AudioEngine {
   constructor() {
     this.ctx = null; this.stream = null; this.source = null; this.node = null;
@@ -10,9 +11,30 @@ export class AudioEngine {
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AC({ latencyHint: 'interactive' });
+      // 输出总线：主音量 → 限幅器 → 扬声器，开大音量也不会爆音
+      this.master = this.ctx.createGain(); this.master.gain.value = 1;
+      const lim = this.ctx.createDynamicsCompressor();
+      lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.05;
+      this.master.connect(lim); lim.connect(this.ctx.destination);
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
     return this.ctx;
+  }
+  /** 必须在用户点击里调用：等 AudioContext 真正运行，再播一段静音“解锁”iOS 的声音输出 */
+  async unlock() {
+    const ctx = this.ensureContext();
+    this._setSession();
+    try { if (ctx.state !== 'running') await ctx.resume(); } catch {}
+    if (!this._unlocked) {
+      const b = ctx.createBuffer(1, 1, ctx.sampleRate), src = ctx.createBufferSource();
+      src.buffer = b; src.connect(ctx.destination); src.start();
+      this._unlocked = true;
+    }
+    return ctx.state === 'running';
+  }
+  /** iOS 17+：没开麦克风时用 playback，静音拨片打开也能出声；开麦克风时用 play-and-record */
+  _setSession() {
+    try { if (navigator.audioSession) navigator.audioSession.type = this.stream ? 'play-and-record' : 'playback'; } catch {}
   }
   get micOn() { return !!this.stream; }
   async startMic() {
@@ -20,6 +42,7 @@ export class AudioEngine {
     if (!window.isSecureContext) throw Object.assign(new Error('insecure'), { code: 'insecure' });
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('unsupported'), { code: 'unsupported' });
     const ctx = this.ensureContext();
+    try { if (navigator.audioSession) navigator.audioSession.type = 'play-and-record'; } catch {}
     this.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
     });
@@ -46,6 +69,7 @@ export class AudioEngine {
     if (this.stream) this.stream.getTracks().forEach((t) => t.stop());
     try { this.source && this.source.disconnect(); this.node && this.node.disconnect(); } catch {}
     this.stream = null; this.source = null; this.node = null;
+    this._setSession();
   }
   _onChunk(data, startTime) {
     const r = this.ring, L = r.length;
@@ -74,6 +98,16 @@ export class Metronome {
     this.onTick = null; // (time, {bar, beat, sub, index}) 每个细分点触发（已排程时间）
   }
   get tickInterval() { return 60 / this.bpm / this.subdiv; }
+  /** 运行中改速度/细分：以下一拍为基准重新对齐，避免时间轴跳变 */
+  set(params) {
+    const run = this.running;
+    Object.assign(this, params);
+    if (run) {
+      const perBar = this.beatsPerBar * this.subdiv;
+      this.index = Math.ceil(this.index / perBar) * perBar; // 新小节开始
+      this.startTime = this.nextTime - this.index * this.tickInterval;
+    }
+  }
   start(startDelay = 0.15) {
     const ctx = this.engine.ensureContext();
     this.running = true;
@@ -99,15 +133,24 @@ export class Metronome {
   }
   _click(t, info) {
     const ctx = this.engine.ctx;
-    const osc = ctx.createOscillator(), g = ctx.createGain();
     const strong = info.sub === 0 && info.beat === 0 && this.accent;
     const main = info.sub === 0;
-    osc.frequency.value = strong ? 1760 : main ? 1320 : 880;
-    const v = this.volume * (strong ? 1 : main ? 0.7 : 0.4);
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(v, t + 0.001);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
-    osc.connect(g); g.connect(ctx.destination);
-    osc.start(t); osc.stop(t + 0.05);
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = strong ? CLICK.accent : main ? CLICK.beat : CLICK.sub;
+    const v = Math.max(0.0002, this.volume * (strong ? 1 : main ? 0.75 : 0.45));
+    // 平滑包络（4ms 起音、指数衰减），频谱集中在 2.4–3.6 kHz，外放模式可以把它和拨弦分开
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(v, t + CLICK.attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + CLICK.attack + CLICK.decay * 5);
+    osc.connect(g); g.connect(this.engine.master);
+    osc.start(t); osc.stop(t + CLICK.length + 0.02);
+  }
+  /** 试听：立刻响 4 下（第一下重音） */
+  async test() {
+    await this.engine.unlock();
+    const t0 = this.engine.ctx.currentTime + 0.08, iv = 0.5;
+    for (let i = 0; i < 4; i++) this._click(t0 + i * iv, { beat: i, sub: 0 });
+    return t0;
   }
 }
