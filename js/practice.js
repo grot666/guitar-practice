@@ -1,5 +1,5 @@
 // practice.js — 练曲子 / 认识指板 的练习界面：滚动六线谱、指板提示、音高判定、「等我」和「跟拍」两种模式
-import { $, $$, esc, settings, engine, metro, needMic, onPitch, onOnset, addHistory, css, fmtC, pct, posText } from './core.js';
+import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, addHistory, css, fmtC, pct, posText } from './core.js';
 import { parseSong } from './songs.js';
 import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, matchOnsets, summarizeRhythm, noteFromFreq } from './dsp.js';
 import { drawBoard, markBoard } from './fretboard.js';
@@ -77,6 +77,7 @@ $('#p-demo').onclick = async () => {
   if (!S) return;
   if (S.demo) { stopAll(); return; }
   stopAll(); resetRun();
+  releaseMicForPlayback('（示范时只播放；点「开始」会重新打开）');
   await engine.unlock();
   const spb = 60 / S.bpm, t0 = engine.ctx.currentTime + 0.4;
   S.demo = true; S.t0 = t0; S.spb = spb; S.demoSrc = [];

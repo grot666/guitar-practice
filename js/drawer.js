@@ -68,6 +68,17 @@ export function initDrawer() {
     if (engine.ctx.state !== 'running') $('#s-out-hint').textContent = '浏览器还没允许播放声音，请再点一次。';
   };
   $('#s-ref').onclick = async () => { await engine.unlock(); engine.pluck(69, undefined, 1.8, 0.9); };
+  $('#s-sound').onclick = async () => {
+    const ok = await engine.unlock();
+    const ctx = engine.ctx, t = ctx.currentTime + 0.05;
+    [60, 64, 67, 72].forEach((m, i) => engine.pluck(m, t + i * 0.18, 0.9, 0.85));
+    const st = { running: '运行中 ✓', suspended: '被暂停（再点一次）', interrupted: '被系统打断（再点一次）', closed: '已关闭' }[ctx.state] || ctx.state;
+    $('#s-sound-info').innerHTML = `应该听到「哆咪嗦哆」4 个音。声音引擎：${st} · ${ctx.sampleRate} Hz` +
+      (ctx.outputLatency ? ` · 输出延迟 ${Math.round(ctx.outputLatency * 1000)} ms` : '') + (engine.sessionType ? ` · 会话 ${engine.sessionType}` : '') +
+      (engine.micOn ? `<br>⚠ 麦克风开着：iPhone 会从听筒出声、音量变小。只听声音时可以先 <a href="#" id="s-sound-mic">关掉麦克风</a>。` : '') +
+      (!ok ? '<br>⚠ 浏览器还没允许出声：再点一次；微信里请用浏览器打开。' : '');
+    const a = $('#s-sound-mic'); if (a) a.onclick = (e) => { e.preventDefault(); disableMic(); $('#s-sound').click(); };
+  };
   $$('[data-lat]').forEach((b) => (b.onclick = () => { settings.latencyMs = Math.max(-100, Math.min(500, settings.latencyMs + +b.dataset.lat)); saveSettings(); }));
   $('#s-cal').onclick = runCalibration;
   $('#s-tol').oninput = (e) => { settings.tolCents = +e.target.value; saveSettings(); };
