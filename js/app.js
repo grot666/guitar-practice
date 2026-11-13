@@ -90,11 +90,12 @@ function histItem(e) {
 function renderSongs() {
   const best = {};
   for (const e of loadHistory()) if (e.type === 'song') best[e.id] = Math.max(best[e.id] || 0, e.stars || 0);
-  $('#song-list').innerHTML = SONGS.map((s, i) => {
+  // 按难度排（同一难度保持原顺序）
+  $('#song-list').innerHTML = [...SONGS].sort((a, b) => a.level - b.level).map((s, i) => {
     const notes = parseSong(s).filter((n) => n.midi !== null);
     const strs = [...new Set(notes.map((n) => n.string))].sort().join('');
     return `<a class="item" href="#play/${s.id}" data-id="${s.id}"><span class="num">${i + 1}</span>
-      <span class="meta"><b>${esc(s.title)}</b><small>${esc(s.en)} · ${notes.length} 个音 · ${strs.split('').join('、')} 弦</small></span>
+      <span class="meta"><b>${esc(s.title)}</b><small>${esc(s.en)} · ${notes.length} 个音 · ${strs.split('').join('、')} 弦${s.beats === 3 ? ' · 3/4 拍' : ''}${s.pickup ? ' · 弱起' : ''}</small></span>
       <span class="side"><span class="lvl-dots">${'●'.repeat(s.level)}${'○'.repeat(3 - s.level)}</span><br><span class="stars-s">${best[s.id] ? STARS(best[s.id]) : ''}</span></span></a>`;
   }).join('');
 }

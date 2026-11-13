@@ -171,12 +171,19 @@
       <p id="ar-l-text" class="muted"></p>
       <div id="ar-l-ctl" class="lesson-ctl"></div>
     </div>
+    <div id="ar-pickup" class="ar-pickup" hidden></div>
     <div id="ar-grid" class="ar-grid"></div>
     <div class="ar-legend small muted"><span><i class="lg ct"></i>和弦内音</span><span><i class="lg nct"></i>不在和弦里</span><span><i class="lg hi"></i>合适</span><span><i class="lg mid"></i>还行</span><span><i class="lg lo"></i>冲突</span><span id="ar-fit"></span></div>
     <div class="ar-transport">
       <button id="ar-play" class="btn primary">▶ 播放</button>
       <div id="ar-layers" class="chips"></div>
       <label class="tempo"><span>速度 <b id="ar-bpm">90</b></span><input id="ar-tempo" type="range" min="50" max="160" value="90"></label>
+    </div>
+    <div class="ar-bass">
+      <span class="small muted">低音音色</span>
+      <div id="ar-bass-tone" class="seg compact" role="group" aria-label="低音音色"></div>
+      <button id="ar-bass-try" class="btn ghost">🔊 试听低音</button>
+      <span id="ar-bass-d" class="small muted"></span>
     </div>
     <div class="row">
       <button id="ar-export" class="btn ghost">导出和弦谱</button>

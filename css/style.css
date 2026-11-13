@@ -312,6 +312,12 @@ input[type=range]:disabled { opacity: .45; }
 .mn.nct { background: transparent; color: var(--muted); box-shadow: inset 0 0 0 1.5px var(--faint); }
 .ar-ph { position: absolute; top: 3px; bottom: 3px; width: 2px; margin-left: 4px; background: var(--accent); border-radius: 2px; opacity: 0; pointer-events: none; box-shadow: 0 0 8px var(--accent); }
 .ar-ph.on { opacity: 1; }
+.ar-pickup { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; background: var(--card); border-radius: 12px; padding: 6px 10px; margin: .2rem 0 0; font-size: .85rem; }
+.ar-pickup .mn { position: static; height: 20px; min-width: 22px; padding: 0 4px; }
+.ar-pickup small { color: var(--muted); flex-basis: 100%; }
+.ar-bass { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; margin: .1rem 0 .6rem; }
+.ar-bass .seg.compact { flex-wrap: wrap; }
+#ar-bass-d { flex-basis: 100%; }
 .ar-legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; align-items: center; margin-bottom: .8rem; }
 .ar-legend span { display: inline-flex; align-items: center; gap: .3rem; }
 .lg { display: inline-block; width: 14px; height: 10px; border-radius: 3px; }
