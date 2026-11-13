@@ -98,6 +98,95 @@ export const SONGS = [
       'E4:1 G4:1 G4:2 F#4:1 E4:0.5 F#4:0.5 G4:2 E4:0.5 F#4:0.5 G4:0.5 E4:0.5 E4:0.5 D4:0.5 B3:0.5 G3:0.5 A3:4 ' +
       'D4:1 B3:0.5 D4:0.5 G4:1.5 F#4:0.5 E4:1 G4:1 D4:2 D4:1 A3:0.5 B3:0.5 C4:1.5 F#3:0.5 G3:4',
   },
+  {
+    id: 'lightly-row', title: '小蜜蜂', en: 'Lightly Row', level: 1, bpm: 96, beats: 4, pickup: 0,
+    source: '德国民歌《Hänschen klein》的旋律（19 世纪），英文版《Lightly Row》，公有领域。谱据《The Everyday Song Book》（1927）',
+    tip: 'C 大调，1–3 弦。「5 3 3 – 4 2 2 –」，和小星星一样只在 1、2 弦上走。',
+    notes: 'G4:1 E4:1 E4:2 F4:1 D4:1 D4:2 C4:1 D4:1 E4:1 F4:1 G4:1 G4:1 G4:2 G4:1 ' +
+      'E4:1 E4:2 F4:1 D4:1 D4:2 C4:1 E4:1 G4:1 G4:1 E4:2 r:2 D4:1 D4:1 D4:1 ' +
+      'D4:1 D4:1 E4:1 F4:2 E4:1 E4:1 E4:1 E4:1 E4:1 F4:1 G4:2 G4:1 E4:1 E4:2 ' +
+      'F4:1 D4:1 D4:2 C4:1 E4:1 G4:1 G4:1 E4:4',
+  },
+  {
+    id: 'old-macdonald', title: '王老先生有块地', en: 'Old MacDonald Had a Farm', level: 1, bpm: 100, beats: 4, pickup: 0,
+    source: '英美传统童谣（1917 年出版，旋律更早），公有领域。谱据 Paul Hardy 曲谱集（只取旋律），移到 C 调',
+    tip: 'C 大调，2、3 弦。中段「咿呀咿呀哦」那几句全在 2 弦 1 品（C），练右手连续拨弦。',
+    notes: 'C4:1 C4:1 C4:1 G3:1 A3:1 A3:1 G3:2 E4:1 E4:1 D4:1 D4:1 C4:2 r:1 G3:1 ' +
+      'C4:1 C4:1 C4:1 G3:1 A3:1 A3:1 G3:2 E4:1 E4:1 D4:1 D4:1 C4:2 r:1 G3:0.5 ' +
+      'G3:0.5 C4:1 C4:1 C4:1 G3:0.5 G3:0.5 C4:1 C4:1 C4:1 r:1 C4:0.5 C4:0.5 C4:1 C4:0.5 ' +
+      'C4:0.5 C4:1 C4:0.5 C4:0.5 C4:0.5 C4:0.5 C4:1 C4:1 C4:1 C4:1 C4:1 G3:1 A3:1 A3:1 ' +
+      'G3:2 E4:1 E4:1 D4:1 D4:1 C4:4',
+  },
+  {
+    id: 'saints', title: '圣者进行曲', en: 'When the Saints Go Marching In', level: 2, bpm: 100, beats: 4, pickup: 3,
+    source: '美国传统黑人灵歌（19 世纪），作者不详，公有领域。谱据 Musica Viva 曲谱库',
+    tip: 'C 大调，1、2 弦。弱起 3 拍：数「1 2 3 4」，从第 2 拍开始弹 C E F。',
+    notes: 'C4:1 E4:1 F4:1 G4:4 r:1 C4:1 E4:1 F4:1 G4:4 r:1 C4:1 E4:1 F4:1 G4:2 ' +
+      'E4:2 C4:2 E4:2 D4:4 r:1 E4:1 E4:1 D4:1 C4:4 E4:2 G4:2 G4:1 F4:3 r:2 ' +
+      'E4:1 F4:1 G4:2 E4:2 C4:2 D4:2 C4:4',
+  },
+  {
+    id: 'oh-susanna', title: '哦！苏珊娜', en: 'Oh! Susanna', level: 2, bpm: 100, beats: 4, pickup: 1,
+    source: 'Stephen Foster 作曲（1848；1864 年去世），公有领域。谱据 Foster 原曲的 C 调 ABC 谱，移到 G 调',
+    tip: 'G 大调，1–3 弦。附点节奏「长-短」很多，先慢速跟拍。',
+    notes: 'G3:0.5 A3:0.5 B3:1 D4:1 D4:1.5 E4:0.5 D4:1 B3:1 G3:1 A3:1 B3:1 B3:1 A3:1 G3:1 ' +
+      'A3:3 G3:0.5 A3:0.5 B3:1 D4:1 D4:1.5 E4:0.5 D4:1 B3:1 G3:1 A3:1 B3:1 B3:1 A3:1 ' +
+      'A3:1 G3:4 C4:2 C4:2 E4:1 E4:2 E4:1 D4:1 D4:1 B3:1 G3:1 A3:3 G3:0.5 A3:0.5 ' +
+      'B3:1 D4:1 D4:1.5 E4:0.5 D4:1 B3:1 G3:1 A3:1 B3:1 B3:1 A3:1 A3:1 G3:4',
+  },
+  {
+    id: 'camptown', title: '康城赛马', en: 'Camptown Races', level: 2, bpm: 100, beats: 4, pickup: 1,
+    source: 'Stephen Foster 作曲（1850；1864 年去世），公有领域。谱据 Colin Hume 整理的传统版本',
+    tip: 'G 大调，1–3 弦。副歌跳到高音 G（1 弦 3 品），提前准备好无名指。',
+    notes: 'D4:1 D4:1 D4:1 B3:1 D4:1 E4:1 D4:1 B3:2 B3:1 A3:3 B3:1 A3:1 r:1 D4:1 ' +
+      'D4:1 D4:1 B3:1 D4:1 E4:1 D4:1 B3:2 A3:2 B3:1 A3:1 G3:3 r:1 G3:1.5 G3:0.5 ' +
+      'B3:1 D4:1 G4:4 E4:1.5 E4:0.5 G4:1 E4:1 D4:3 B3:1 D4:1 D4:1 B3:1 D4:1 E4:1 ' +
+      'D4:1 B3:2 A3:1 B3:0.5 C4:0.5 B3:1 A3:0.5 A3:0.5 G3:4',
+  },
+  {
+    id: 'red-river', title: '红河谷', en: 'Red River Valley', level: 2, bpm: 96, beats: 4, pickup: 2,
+    source: '北美传统民歌（19 世纪末），作者不详，公有领域。谱据 Musica Viva 曲谱库，与维基百科乐谱对照，移到 C 调',
+    tip: 'C 大调，1–3 弦。弱起 2 拍（5̣ 1），长音要数满拍。',
+    notes: 'G3:1 C4:1 E4:2 E4:1 E4:1 E4:2 D4:1 E4:1 D4:1 C4:5 G3:1 C4:1 E4:2 C4:1 ' +
+      'E4:1 G4:2 F4:1 E4:1 D4:6 G4:1 F4:1 E4:2 E4:1 D4:1 C4:2 D4:1 E4:1 G4:1 ' +
+      'F4:5 B3:1 A3:1 G3:2 B3:1 C4:1 D4:2 E4:1 D4:1 C4:4',
+  },
+  {
+    id: 'clementine', title: '新年好（克莱门汀）', en: 'Oh My Darling, Clementine', level: 2, bpm: 100, beats: 3, pickup: 1,
+    source: '美国民歌，1884 年出版（Percy Montrose），1929 年前出版，公有领域；中文《新年好》用的就是这条旋律',
+    tip: '3/4 拍，弱起。附点「哒-嗒」：前一个音长、后一个音短。',
+    notes: 'C4:0.75 C4:0.25 C4:1 G3:1 E4:0.75 E4:0.25 E4:1 C4:1 C4:0.75 E4:0.25 G4:1 G4:1 F4:0.75 E4:0.25 ' +
+      'D4:2 D4:0.75 E4:0.25 F4:1 F4:1 E4:0.75 D4:0.25 E4:1 C4:1 C4:0.75 E4:0.25 D4:1 G3:1 B3:0.75 ' +
+      'D4:0.25 C4:2 C4:0.75 C4:0.25 C4:1 G3:1 E4:0.75 E4:0.25 E4:1 C4:1 C4:0.75 E4:0.25 G4:1 G4:1 ' +
+      'F4:0.75 E4:0.25 D4:2 D4:0.75 E4:0.25 F4:1 F4:1 E4:0.75 D4:0.25 E4:1 C4:1 C4:0.75 E4:0.25 D4:1 ' +
+      'G3:1 B3:0.75 D4:0.25 C4:3',
+  },
+  {
+    id: 'amazing-grace', title: '奇异恩典', en: 'Amazing Grace', level: 2, bpm: 84, beats: 3, pickup: 1,
+    source: '曲调《New Britain》，美国传统赞美诗旋律（1829 年出版，1835 年起配 John Newton 1779 年的歌词），公有领域。谱据维基百科乐谱，移到 C 调',
+    tip: '3/4 拍，弱起 1 拍。C 大调，1–3 弦，速度慢，注意每小节第 1 拍的长音。',
+    notes: 'G3:1 C4:2 E4:0.5 C4:0.5 E4:2 D4:1 C4:2 A3:1 G3:2 G3:1 C4:2 E4:0.5 C4:0.5 E4:2 ' +
+      'D4:1 G4:2 E4:1 G4:1.5 E4:0.5 G4:0.5 E4:0.5 C4:2 G3:1 A3:1.5 C4:0.5 C4:0.5 A3:0.5 G3:2 ' +
+      'G3:1 C4:2 E4:0.5 C4:0.5 E4:2 D4:1 C4:3',
+  },
+  {
+    id: 'brahms-lullaby', title: '勃拉姆斯摇篮曲', en: 'Lullaby（Brahms）', level: 2, bpm: 84, beats: 3, pickup: 1,
+    source: '勃拉姆斯《摇篮曲》Op. 49 No. 4（1868；勃拉姆斯 1897 年去世），公有领域。谱据《The Everyday Song Book》（1927）',
+    tip: '3/4 拍，弱起。G 大调，会用到 1 弦 2 品的 #F。轻轻弹。',
+    notes: 'B3:0.5 B3:0.5 D4:1.5 B3:0.5 B3:1 D4:1 r:1 B3:0.5 D4:0.5 G4:1 F#4:1.5 E4:0.5 E4:1 D4:1 ' +
+      'A3:0.5 B3:0.5 C4:1 A3:1 A3:0.5 B3:0.5 C4:1 r:1 A3:0.5 C4:0.5 F#4:0.5 E4:0.5 D4:1 F#4:1 ' +
+      'G4:1 r:1 G3:0.5 G3:0.5 G4:2 E4:0.5 C4:0.5 D4:2 B3:0.5 G3:0.5 C4:1 D4:1 E4:1 D4:2 ' +
+      'G3:0.5 G3:0.5 G4:2 E4:0.5 C4:0.5 D4:2 B3:0.5 G3:0.5 C4:1 B3:1 A3:1 G3:3',
+  },
+  {
+    id: 'auld-lang-syne', title: '友谊地久天长', en: 'Auld Lang Syne', level: 3, bpm: 80, beats: 4, pickup: 1,
+    source: '苏格兰传统民歌，Robert Burns 1788 年填词，公有领域。谱据维基百科乐谱与《The Everyday Song Book》（1927），移到 G 调',
+    tip: 'G 大调，弱起。低音 D、E 在 4 弦（空弦、2 品），句尾「D D C」那里要换到 4 弦。',
+    notes: 'D3:1 G3:1.5 G3:0.5 G3:1 B3:1 A3:1.5 G3:0.5 A3:1 B3:1 G3:1.5 G3:0.5 B3:1 D4:1 E4:3 ' +
+      'E4:1 D4:1.5 B3:0.5 B3:1 G3:1 A3:1.5 G3:0.5 A3:1 B3:1 G3:1.5 E3:0.5 E3:1 D3:1 G3:3 ' +
+      'E4:1 D4:1.5 B3:0.5 B3:1 G3:1 A3:1.5 G3:0.5 A3:1 E4:1 D4:1.5 B3:0.5 B3:1 D4:1 E4:3 ' +
+      'E4:1 D4:1.5 B3:0.5 B3:1 G3:1 A3:1.5 G3:0.5 A3:1 B3:1 G3:1.5 E3:0.5 E3:1 D3:1 G3:4',
+  },
 ];
 
 /** 第一把位自动指法：在 0–4 品里选最细（音高最高）的弦；1–3 弦优先 */
