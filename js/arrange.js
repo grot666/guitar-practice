@@ -1,7 +1,8 @@
 // arrange.js — 编曲入门：旋律 / 和弦 / 低音 / 鼓 分层试听，5 个小课
 import { $, $$, esc, engine, releaseMicForPlayback } from './core.js';
 import { ARRANGE, ARRANGE_SONGS, CHORDS, KEYS, DEGREES, PATTERNS, PC_NAME, scaleOf, slotsOf, fitOf, fitClass, songFit,
-  autoHarmonize, minorColor, buildSchedule, chordChart, degreeOf, isChordTone } from './harmony.js';
+  autoHarmonize, minorColor, buildSchedule, chordChart, degreeOf, isChordTone, bassMidi, pickupOf, pickupNotes } from './harmony.js';
+import { BASS_TONES, DEFAULT_BASS } from './bass.js';
 import { drawBoard, markShape } from './fretboard.js';
 
 const LS = 'guitar-practice:arrange';
@@ -13,8 +14,9 @@ const st = {
   layers: { melody: true, chords: true, bass: false, drums: false, drone: false },
   mood: 'orig', // 只在第 5 课用，不保存
   focus: null,  // 第 2 课：正在看的和弦
+  bassTone: BASS_TONES[saved.bassTone] ? saved.bassTone : DEFAULT_BASS,
 };
-const save = () => localStorage.setItem(LS, JSON.stringify({ songId: st.songId, step: st.step, bySong: st.bySong }));
+const save = () => localStorage.setItem(LS, JSON.stringify({ songId: st.songId, step: st.step, bySong: st.bySong, bassTone: st.bassTone }));
 const song = () => ARRANGE_SONGS.find((s) => s.id === st.songId);
 const A = () => ARRANGE[st.songId];
 function arr() {
@@ -32,7 +34,7 @@ const LESSONS = [
   { t: '给旋律配和弦', s: '配和弦',
     p: '点谱上的和弦块换一个和弦（I → IV → V → vi → V7），会马上弹这一格给你听。颜色告诉你旋律有多少落在和弦里：<b class="c-hi">绿</b> 合适，<b class="c-mid">黄</b> 还行，<b class="c-lo">红</b> 打架。' },
   { t: '伴奏型', s: '伴奏型',
-    p: '和弦不变，只换右手的弹法，整首歌的感觉就不一样了。边播放边切换试试。' },
+    p: '和弦不变，只换右手的弹法，整首歌的感觉就不一样了。边播放边切换试试。低音也跟着变：扫弦、低音+和弦时，低音弹「根音–五音」；3/4 拍的歌，「低音+和弦」就是华尔兹的「嘣-恰-恰」。' },
   { t: '速度与情绪', s: '情绪',
     p: '同一条旋律：快一点、扫弦 → 欢快；慢一点、分解和弦，再把一些 I 换成 vi（关系小调和弦，和 I 有两个共同音）→ 抒情、带点忧伤。' },
 ];
@@ -124,12 +126,12 @@ function focusChord(ch, sound) {
 // ---------- 谱面 ----------
 function renderGrid() {
   const s = song(), a = A(), slots = slotsOf(s), chords = playChords(), base = arr().chords;
-  const per = s.beats / a.slot, bars = slots.length / per;
+  const per = s.beats / a.slot, bars = slots.length / per, pk = pickupOf(s);
   const mids = slots.flatMap((x) => x.notes.map((n) => n.note.midi)), lo = Math.min(...mids), hi = Math.max(...mids);
   const focus = null; // 谱面始终显示当前编配的和弦
   let h = '';
   for (let b = 0; b < bars; b++) {
-    const bs = b * s.beats;
+    const bs = pk + b * s.beats;
     h += `<div class="ar-bar" data-b="${b}"><div class="ar-chords">`;
     for (let k = 0; k < per; k++) {
       const i = b * per + k, ch = focus || chords[i], f = fitOf(slots[i], ch);
@@ -148,6 +150,9 @@ function renderGrid() {
     }
     h += `</div><i class="ar-ph"></i></div>`;
   }
+  const pn = pickupNotes(s);
+  $('#ar-pickup').hidden = !pn.length;
+  $('#ar-pickup').innerHTML = pn.length ? `<b>弱起 ${pk} 拍</b>${pn.map((n) => `<span class="mn nct">${PC_NAME[n.midi % 12]}</span>`).join('')}<small>不完整的「第 0 小节」，不配和弦；和弦从下一小节第 1 拍开始</small>` : '';
   $('#ar-grid').innerHTML = h;
   $('#ar-grid').style.setProperty('--per', per);
   $('#ar-fit').textContent = `整体贴合 ${Math.round(songFit(s, focus ? chords.map(() => focus) : chords) * 100)}%`;
@@ -195,6 +200,8 @@ function scheduleEvents(events, t0, from = 0, to = Infinity) {
     if (e.t < from - 1e-6 || e.t >= to) continue;
     const t = t0 + e.t, vol = e.vol * 0.7; // 多层叠加时留出余量，避免削波
     if (e.kind === 'kick' || e.kind === 'hat') P.nodes.push(drum(e.kind, t, vol));
+    else if (e.kind === 'bass') P.nodes.push(engine.bass(e.midi, t, e.dur, vol, st.bassTone));
+    else if (e.kind === 'drone') P.nodes.push(engine.bass(e.midi, t, e.dur, vol * 0.9, 'warm'));
     else P.nodes.push(engine.pluck(e.midi, t, e.dur, vol));
   }
 }
@@ -218,7 +225,8 @@ function restartIfPlaying(keepPos) {
   if (!P.on) return;
   const pos = Math.max(0, engine.ctx.currentTime - P.t0);
   // 从当前小节开头重新排程，层的开关「马上」听得到
-  const barSec = song().beats * P.spb, from = keepPos ? Math.floor(pos / barSec) * barSec : 0;
+  const barSec = song().beats * P.spb, pkSec = pickupOf(song()) * P.spb;
+  const from = keepPos && pos > pkSec ? pkSec + Math.floor((pos - pkSec) / barSec) * barSec : 0;
   play(Math.min(from, P.total - 0.01));
 }
 function previewSlot(i) {
@@ -235,20 +243,25 @@ function previewSlot(i) {
   const pos = engine.ctx.currentTime - P.t0;
   if (pos > P.total + 0.6) { stop(); return; }
   if (pos < 0) return;
-  const s = song(), barSec = s.beats * P.spb, b = Math.floor(pos / barSec);
+  const s = song(), barSec = s.beats * P.spb, pkSec = pickupOf(s) * P.spb, rel = pos - pkSec, b = rel < 0 ? -1 : Math.floor(rel / barSec);
   const bars = $$('#ar-grid .ar-bar');
   bars.forEach((el, k) => {
     const ph = el.querySelector('.ar-ph');
-    if (k === b) { ph.classList.add('on'); ph.style.left = ((pos - b * barSec) / barSec) * 100 + '%'; }
+    if (k === b) { ph.classList.add('on'); ph.style.left = ((rel - b * barSec) / barSec) * 100 + '%'; }
     else ph.classList.remove('on');
   });
-  const slot = Math.floor(pos / (A().slot * P.spb));
+  const slot = rel < 0 ? -1 : Math.floor(rel / (A().slot * P.spb));
   $$('#ar-grid .cblk').forEach((c) => c.classList.toggle('playing', +c.dataset.i === slot));
 })();
 
 // ---------- 控件 ----------
 function syncTempo() { $('#ar-tempo').value = arr().bpm; $('#ar-bpm').textContent = arr().bpm; }
-$('#ar-song').innerHTML = ARRANGE_SONGS.map((s) => `<option value="${s.id}">${esc(s.title)}（${ARRANGE[s.id].key} 调）</option>`).join('');
+{
+  // 选曲按「拍子」分组：先 4/4 从第 1 拍开始的，再有弱起的，最后 3/4 拍
+  const groups = [['4/4 拍', (x) => x.beats === 4 && !x.pickup], ['4/4 拍 · 弱起（从小节中间开始唱）', (x) => x.beats === 4 && x.pickup], ['3/4 拍（华尔兹「嘣-恰-恰」）', (x) => x.beats === 3]];
+  const opt = (x) => `<option value="${x.id}">${esc(x.title)}（${ARRANGE[x.id].key} 调${x.pickup ? ' · 弱起' : ''}）</option>`;
+  $('#ar-song').innerHTML = groups.map(([g, f]) => `<optgroup label="${g}">${ARRANGE_SONGS.filter(f).map(opt).join('')}</optgroup>`).join('');
+}
 $('#ar-song').onchange = (e) => { stop(); st.songId = e.target.value; st.mood = 'orig'; save(); renderAll(); };
 $('#ar-play').onclick = () => (P.on ? stop() : play(0));
 $('#ar-tempo').oninput = (e) => { arr().bpm = +e.target.value; $('#ar-bpm').textContent = arr().bpm; save(); };
@@ -260,12 +273,33 @@ $('#ar-export').onclick = async () => {
   try { await navigator.clipboard.writeText(txt); pre.dataset.note = '已复制到剪贴板'; } catch { pre.dataset.note = ''; }
 };
 
+// ---------- 低音音色 ----------
+function renderBassTone() {
+  $('#ar-bass-tone').innerHTML = Object.entries(BASS_TONES).map(([k, t]) => `<button data-v="${k}" class="${st.bassTone === k ? 'on' : ''}">${t.name}</button>`).join('');
+  $('#ar-bass-d').textContent = BASS_TONES[st.bassTone].desc;
+  $$('#ar-bass-tone button').forEach((b) => (b.onclick = () => {
+    st.bassTone = b.dataset.v; save(); renderBassTone();
+    if (P.on) { if (!st.layers.bass) { st.layers.bass = true; renderLayers(); } restartIfPlaying(true); } else previewBass();
+  }));
+}
+/** 试听：在本调里弹一小段低音线 I – V – vi – IV（根音-五音），只有低音 */
+function previewBass() {
+  stop();
+  engine.unlockSync(true);
+  const K = KEYS[A().key], spb = 60 / 104, t0 = engine.ensureContext().currentTime + 0.08;
+  const line = [];
+  ['I', 'V', 'vi', 'IV'].forEach((d, i) => { const r = bassMidi(K.chords[d]); line.push([r, i * 2, 1], [r + 7, i * 2 + 1, 1]); });
+  line.push([bassMidi(K.chords.I), 8, 2]);
+  for (const [m, b, d] of line) P.nodes.push(engine.bass(m, t0 + b * spb, d * spb * 0.92, 0.55 * 0.7, st.bassTone));
+}
+$('#ar-bass-try').onclick = previewBass;
+
 function renderAll() {
   $('#ar-song').value = st.songId;
   const K = KEYS[A().key];
   $('#ar-key').textContent = `${A().key} 大调 · I=${K.chords.I} IV=${K.chords.IV} V=${K.chords.V} vi=${K.chords.vi}`;
   $('#ar-chart').hidden = true;
-  syncTempo(); renderSteps(); renderLesson(); renderGrid(); renderLayers();
+  syncTempo(); renderSteps(); renderLesson(); renderGrid(); renderLayers(); renderBassTone();
 }
 export function openArrange() { releaseMicForPlayback('（编曲页只播放，不用听）'); renderAll(); }
 export function closeArrange() { stop(); }
