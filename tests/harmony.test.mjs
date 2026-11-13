@@ -31,8 +31,10 @@ console.log('== 曲子：参考和弦 / 自动配和弦');
 for (const song of ARRANGE_SONGS) {
   const a = ARRANGE[song.id], K = KEYS[a.key], slots = slotsOf(song);
   const total = parseSong(song).reduce((m, n) => Math.max(m, n.start + n.beats), 0);
-  ok(song.pickup === 0, `${song.id} 不支持弱起`);
-  ok(total % song.beats === 0 && song.beats % a.slot === 0, `${song.id} 小节/和弦格不整齐`);
+  const pk = song.pickup || 0;
+  ok(pk < song.beats, `${song.id} 弱起应不满一小节`);
+  ok((total - pk) % song.beats === 0 && song.beats % a.slot === 0, `${song.id} 小节/和弦格不整齐`);
+  ok(slots[0].start === pk, `${song.id} 第一个和弦格应从弱起之后开始`);
   ok(a.chords.length === slots.length, `${song.id} 参考和弦 ${a.chords.length} 个，应为 ${slots.length}`);
   const dia = Object.values(K.chords);
   ok(a.chords.every((c) => dia.includes(c)), `${song.id} 参考和弦有调外和弦`);
@@ -86,6 +88,37 @@ console.log('== 播放事件表');
   const boom = buildSchedule(song, { chords: a.chords, bpm: 60, pattern: 'boom', layers: { chords: true } }).events;
   ok(boom.filter((e) => e.vol > 0.3).map((e) => e.t).slice(0, 4).join() === '0,2,4,6', '低音+和弦：低音应在第 1、3 拍');
   ok(chordChart(song, a.chords).split('\n')[1] === '| G | C G | C G | D G |', '和弦谱格式');
+}
+console.log('== 弱起、3/4 拍、低音线');
+{
+  const all = { melody: true, chords: true, bass: true, drums: true };
+  // 弱起：和弦、低音、鼓都从弱起之后开始；弱起里只有旋律
+  for (const id of ['saints', 'red-river', 'amazing-grace', 'auld-lang-syne', 'happy-birthday']) {
+    const song = ARRANGE_SONGS.find((s) => s.id === id), a = ARRANGE[id], pk = song.pickup, spb = 60 / song.bpm;
+    for (const pattern of Object.keys(PATTERNS)) {
+      const { events, total } = buildSchedule(song, { chords: a.chords, bpm: song.bpm, pattern, layers: all });
+      const pre = events.filter((e) => e.t < pk * spb - 1e-9);
+      ok(pre.length > 0 && pre.every((e) => e.kind === 'melody'), `${id} ${pattern}：弱起里应只有旋律`);
+      ok(events.filter((e) => e.kind === 'kick')[0].t === pk * spb, `${id} ${pattern}：第一个底鼓应在弱起之后的第 1 拍`);
+      ok(Math.abs(total - (pk + slotsOf(song).length * a.slot) * spb) < 1e-9, `${id} 总长`);
+    }
+    ok(chordChart(song, a.chords).includes(`弱起 ${pk} 拍`), `${id} 和弦谱应注明弱起`);
+  }
+  // 3/4：「低音+和弦」= 嘣-恰-恰，低音只在每小节第 1 拍；鼓每小节一个底鼓、三个踩镲
+  const bl = ARRANGE_SONGS.find((s) => s.id === 'brahms-lullaby'), spb = 60 / 60;
+  const ev = buildSchedule(bl, { chords: ARRANGE['brahms-lullaby'].chords, bpm: 60, pattern: 'boom', layers: { chords: true, drums: true } }).events;
+  const booms = ev.filter((e) => e.kind === 'chord' && e.vol > 0.3).map((e) => +(e.t - bl.pickup * spb).toFixed(6));
+  ok(booms.length === 16 && booms.every((t, i) => t === i * 3), '3/4 低音+和弦：低音应在每小节第 1 拍');
+  ok(ev.filter((e) => e.kind === 'chord' && e.vol <= 0.3).length === 16 * 2 * 3, '3/4 低音+和弦：每小节两下「恰」');
+  ok(ev.filter((e) => e.kind === 'kick').length === 16 && ev.filter((e) => e.kind === 'hat').length === 48, '3/4 鼓');
+  const arp = buildSchedule(bl, { chords: ARRANGE['brahms-lullaby'].chords, bpm: 60, pattern: 'arp', layers: { chords: true } }).events;
+  ok(arp.length === 16 * 6, '3/4 分解和弦：每小节 6 个八分音符');
+  // 低音线：4 拍一格 + 扫弦 → 根音、五音；其他 → 根音
+  const tw = ARRANGE_SONGS.find((s) => s.id === 'jingle-bells');
+  const b1 = buildSchedule(tw, { chords: ARRANGE['jingle-bells'].chords, bpm: 60, pattern: 'strum', layers: { bass: true } }).events;
+  ok(b1.length === 32 && b1.every((e, i) => (i % 2 ? e.midi === b1[i - 1].midi + 7 && e.t === b1[i - 1].t + 2 : CHORDS[ARRANGE['jingle-bells'].chords[e.slot]].root === e.midi % 12)), '扫弦时低音 = 根音（第 1 拍）+ 五音（第 3 拍）');
+  const b2 = buildSchedule(tw, { chords: ARRANGE['jingle-bells'].chords, bpm: 60, pattern: 'pad', layers: { bass: true } }).events;
+  ok(b2.length === 16 && b2.every((e) => e.midi >= 40 && e.midi <= 51), '长音时每格一个根音，音区 E2–D#3');
 }
 console.log(fails ? `\n${fails} 项失败` : '\n全部通过');
 process.exit(fails ? 1 : 0);
