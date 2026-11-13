@@ -2,6 +2,7 @@
 //   和弦定义（组成音、吉他开放把位按法、播放用的音高）、调内和弦（I IV V vi）、
 //   旋律和和弦的「贴合度」、自动配和弦、伴奏型 → 播放事件表。
 import { SONGS, parseSong } from './songs.js';
+import { bassRegister } from './bass.js';
 
 export const PC_NAME = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 
@@ -30,7 +31,7 @@ export const scaleOf = (key) => MAJOR_STEPS.map((s) => (KEYS[key].tonic + s) % 1
 export function stackTriad(key, d) { const sc = scaleOf(key); return [sc[d % 7], sc[(d + 2) % 7], sc[(d + 4) % 7]]; }
 export const ROMAN_INDEX = { I: 0, ii: 1, iii: 2, IV: 3, V: 4, vi: 5 };
 export function degreeOf(key, chord) { for (const [r, c] of Object.entries(KEYS[key].chords)) if (c === chord) return r; return ''; }
-export const bassMidi = (chord) => 36 + CHORDS[chord].root; // 低音：C2–B2 一个八度
+export const bassMidi = (chord) => bassRegister(CHORDS[chord].root); // 低音：E2–D#3 一个八度（见 bass.js）
 
 /**
  * 可以编曲的曲子：key 调，slot 每个和弦格占几拍，chords 参考和弦（按格）。
@@ -47,15 +48,49 @@ export const ARRANGE = {
     chords: ['C', 'C', 'G7', 'G7', 'C', 'C', 'C', 'G',  'C', 'C', 'G7', 'G7', 'C', 'C', 'G', 'C',
              'G', 'C', 'G7', 'C', 'G7', 'C', 'C', 'G',  'C', 'C', 'G7', 'G7', 'C', 'C', 'G', 'C'] },
   'jingle-bells': { key: 'C', slot: 4, chords: ['C', 'C', 'C', 'C', 'F', 'C', 'G', 'G', 'C', 'C', 'C', 'C', 'F', 'C', 'G', 'C'] },
+  'hot-cross-buns': { key: 'G', slot: 2, chords: ['G', 'G', 'G', 'G', 'G', 'D', 'G', 'G'] },
+  'au-clair': { key: 'C', slot: 2,
+    // 中段 D D D D | A A：A 落在 F 和弦里（IV），D C B A 用 G 收到半终止
+    chords: ['C', 'C', 'C', 'G', 'C', 'G', 'C', 'C',  'C', 'C', 'C', 'G', 'C', 'G', 'C', 'C',
+             'G', 'G', 'F', 'F', 'G', 'G', 'G', 'G',  'C', 'C', 'C', 'G', 'C', 'G', 'C', 'C'] },
+  'yankee-doodle': { key: 'C', slot: 2, chords: ['C', 'C', 'C', 'G', 'C', 'C', 'C', 'G', 'C', 'C', 'F', 'G7', 'G', 'G', 'C', 'C'] },
+  'two-tigers': { key: 'G', slot: 4, chords: ['G', 'G', 'G', 'G', 'G', 'G', 'G', 'G'] }, // 轮唱曲：几个声部错开唱也不打架，因为整首都在一个和弦上
+  'lightly-row': { key: 'C', slot: 4, chords: ['C', 'G7', 'C', 'C', 'C', 'G7', 'C', 'C', 'G7', 'G7', 'C', 'C', 'C', 'G7', 'C', 'C'] },
+  'old-macdonald': { key: 'C', slot: 2,
+    chords: ['C', 'C', 'F', 'C', 'C', 'G7', 'C', 'C',  'C', 'C', 'F', 'C', 'C', 'G7', 'C', 'C',
+             'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C',  'C', 'C', 'F', 'C', 'C', 'G7', 'C', 'C'] },
+  saints: { key: 'C', slot: 2, // 弱起 3 拍「Oh when the」
+    chords: ['C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'G', 'G', 'C', 'G7',
+             'C', 'C', 'C', 'C', 'F', 'F', 'F', 'F', 'C', 'C', 'F', 'G', 'C', 'C'] },
+  'oh-susanna': { key: 'G', slot: 2,
+    chords: ['G', 'G', 'G', 'G', 'G', 'G', 'D7', 'D7', 'G', 'G', 'G', 'G', 'G', 'D7', 'G', 'G',
+             'C', 'C', 'C', 'C', 'G', 'G', 'D7', 'D7', 'G', 'G', 'G', 'G', 'G', 'D7', 'G', 'G'] },
+  camptown: { key: 'G', slot: 4, chords: ['G', 'G', 'D7', 'D7', 'G', 'G', 'D7', 'G', 'G', 'G', 'C', 'G', 'G', 'G', 'D7', 'G'] },
+  'red-river': { key: 'C', slot: 2,
+    chords: ['C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'C', 'G7', 'G7', 'G7', 'G7', 'G7',
+             'C', 'C', 'C', 'C', 'F', 'F', 'F', 'G7', 'G7', 'G7', 'G7', 'G7', 'C', 'C'] },
+  clementine: { key: 'C', slot: 3, chords: ['C', 'C', 'C', 'G7', 'G7', 'C', 'G7', 'C', 'C', 'C', 'C', 'G7', 'G7', 'C', 'G7', 'C'] },
+  'amazing-grace': { key: 'C', slot: 3, chords: ['C', 'C', 'F', 'C', 'C', 'C', 'G', 'C', 'C', 'F', 'C', 'C', 'C', 'C'] }, // 倒数第 2 小节「now I」E–D：E 在强拍上，用 C 比 G 贴合（唱诗本里这里是 C/G → G7 的一拍）
+  'brahms-lullaby': { key: 'G', slot: 3, chords: ['G', 'G', 'D7', 'D7', 'D7', 'D7', 'D7', 'G', 'C', 'G', 'D7', 'G', 'C', 'G', 'D7', 'G'] },
+  'auld-lang-syne': { key: 'G', slot: 2,
+    chords: ['G', 'G', 'D7', 'D7', 'G', 'G', 'C', 'C', 'G', 'G', 'D7', 'D7', 'C', 'D7', 'G', 'G',
+             'G', 'G', 'D7', 'D7', 'G', 'G', 'C', 'C', 'G', 'G', 'D7', 'D7', 'C', 'D7', 'G', 'G'] },
+  'happy-birthday': { key: 'C', slot: 3, chords: ['C', 'G7', 'G7', 'C', 'C', 'F', 'C', 'C'] },
+  songbie: { key: 'G', slot: 2,
+    // 长亭外 古道边 | 芳草碧连天：I – IV I – I – V，每 4 小节一句，句尾落在 V 或 I
+    chords: ['G', 'G', 'C', 'G', 'G', 'G', 'D', 'D', 'G', 'G', 'C', 'G', 'G', 'D7', 'G', 'G',
+             'C', 'C', 'D', 'G', 'C', 'G', 'D', 'D', 'G', 'G', 'C', 'G', 'G', 'D7', 'G', 'G'] },
 };
 export const ARRANGE_SONGS = Object.keys(ARRANGE).map((id) => SONGS.find((s) => s.id === id));
 
-/** 每个和弦格里的旋律：[{note, w}]，w = 在格内的时长 ×（落在格的起点 = 强拍时 ×1.5） */
+/** 弱起拍数（曲子开头不完整的小节，不配和弦） */
+export const pickupOf = (song) => song.pickup || 0;
+/** 每个和弦格里的旋律：[{note, w}]，w = 在格内的时长 ×（落在格的起点 = 强拍时 ×1.5）。和弦格从弱起之后开始 */
 export function slotsOf(song) {
-  const a = ARRANGE[song.id], notes = parseSong(song).filter((n) => n.midi !== null);
+  const a = ARRANGE[song.id], notes = parseSong(song).filter((n) => n.midi !== null), pk = pickupOf(song);
   const total = notes.reduce((m, n) => Math.max(m, n.start + n.beats), 0);
-  const count = Math.round(total / a.slot);
-  const slots = Array.from({ length: count }, (_, i) => ({ i, start: i * a.slot, beats: a.slot, notes: [] }));
+  const count = Math.round((total - pk) / a.slot);
+  const slots = Array.from({ length: count }, (_, i) => ({ i, start: pk + i * a.slot, beats: a.slot, notes: [] }));
   for (const n of notes) {
     for (const s of slots) {
       const ov = Math.min(n.start + n.beats, s.start + s.beats) - Math.max(n.start, s.start);
@@ -64,6 +99,8 @@ export function slotsOf(song) {
   }
   return slots;
 }
+/** 弱起里的旋律音（谱面上单独画在第一小节前面） */
+export const pickupNotes = (song) => parseSong(song).filter((n) => n.midi !== null && n.start < pickupOf(song) - 1e-6);
 export const isChordTone = (midi, chord) => CHORDS[chord].tones.includes(((midi % 12) + 12) % 12);
 /** 贴合度：这一格里旋律（按时长和强拍加权）有多少落在和弦内音上，0–1 */
 export function fitOf(slot, chord) {
@@ -122,7 +159,7 @@ export const PATTERNS = {
   pad:   { name: '长音', desc: '每个和弦拨一下，让它一直响。最安静，突出旋律。' },
   strum: { name: '扫弦', desc: '每拍扫一下。节奏感强，热闹。' },
   arp:   { name: '分解和弦', desc: '把和弦里的音一个一个弹出来（八分音符）。流动、抒情。' },
-  boom:  { name: '低音+和弦', desc: '「嘣-恰」：强拍弹低音，弱拍弹和弦。民谣、乡村常用。' },
+  boom:  { name: '低音+和弦', desc: '「嘣-恰」：强拍弹低音，弱拍弹和弦。民谣、乡村常用；3/4 拍就是「嘣-恰-恰」（华尔兹）。' },
 };
 
 /**
@@ -131,9 +168,10 @@ export const PATTERNS = {
  * 事件：{ t, kind: 'melody'|'chord'|'bass'|'drone'|'kick'|'hat', midi?, dur, vol, slot? }
  */
 export function buildSchedule(song, opts) {
-  const a = ARRANGE[song.id], spb = 60 / opts.bpm, L = opts.layers, beatsPerBar = song.beats;
+  const a = ARRANGE[song.id], spb = 60 / opts.bpm, L = opts.layers, beatsPerBar = song.beats, pk = pickupOf(song);
   const slots = slotsOf(song), ev = [];
-  const total = slots.length * a.slot * spb;
+  const total = (pk + slots.length * a.slot) * spb;
+  const inBarOf = (beat) => (((beat - pk) % beatsPerBar) + beatsPerBar) % beatsPerBar;
   if (L.melody) for (const n of parseSong(song)) if (n.midi !== null) ev.push({ t: n.start * spb, kind: 'melody', midi: n.midi, dur: n.beats * spb * 0.95, vol: 0.9 });
   slots.forEach((s, i) => {
     const ch = opts.chords[i], v = CHORDS[ch].voicing, t0 = s.start * spb;
@@ -141,34 +179,42 @@ export function buildSchedule(song, opts) {
       if (opts.pattern === 'pad') v.forEach((m, k) => ev.push({ t: t0 + k * 0.012, kind: 'chord', midi: m, dur: s.beats * spb * 0.98, vol: 0.2, slot: i }));
       else if (opts.pattern === 'strum') {
         for (let b = 0; b < s.beats; b++) {
-          const acc = (s.start + b) % beatsPerBar === 0;
+          const acc = inBarOf(s.start + b) === 0;
           v.forEach((m, k) => ev.push({ t: t0 + b * spb + k * 0.01, kind: 'chord', midi: m, dur: spb * 0.9, vol: acc ? 0.24 : 0.17, slot: i }));
         }
       } else if (opts.pattern === 'arp') {
-        const n = v.length, order = [0, n - 3, n - 2, n - 1, n - 2, n - 3, n - 2, n - 1];
-        for (let e = 0; e < s.beats * 2; e++) ev.push({ t: t0 + e * spb / 2, kind: 'chord', midi: v[order[e % 8]], dur: spb * 1.2, vol: e % 8 === 0 ? 0.3 : 0.22, slot: i });
+        const n = v.length, order = beatsPerBar === 3 ? [0, n - 3, n - 2, n - 1, n - 2, n - 3] : [0, n - 3, n - 2, n - 1, n - 2, n - 3, n - 2, n - 1];
+        for (let e = 0; e < s.beats * 2; e++) ev.push({ t: t0 + e * spb / 2, kind: 'chord', midi: v[order[e % order.length]], dur: spb * 1.2, vol: e % order.length === 0 ? 0.3 : 0.22, slot: i });
       } else if (opts.pattern === 'boom') {
+        // 4/4：「嘣-恰-嘣-恰」，低音在 1、3 拍；3/4：「嘣-恰-恰」（华尔兹），低音只在第 1 拍
         for (let b = 0; b < s.beats; b++) {
-          const inBar = (s.start + b) % beatsPerBar;
-          const tb = t0 + b * spb;
-          if (inBar % 2 === 0) ev.push({ t: tb, kind: 'chord', midi: v[0], dur: spb * 0.95, vol: 0.34, slot: i });
+          const inBar = inBarOf(s.start + b), tb = t0 + b * spb;
+          const boomBeat = beatsPerBar === 3 ? inBar === 0 : inBar % 2 === 0;
+          if (boomBeat) ev.push({ t: tb, kind: 'chord', midi: v[0], dur: spb * 0.95, vol: 0.34, slot: i });
           else v.slice(-3).forEach((m, k) => ev.push({ t: tb + k * 0.006, kind: 'chord', midi: m, dur: spb * 0.55, vol: 0.2, slot: i }));
         }
       }
     }
-    if (L.bass) ev.push({ t: t0, kind: 'bass', midi: bassMidi(ch), dur: s.beats * spb * 0.95, vol: 0.55, slot: i });
+    if (L.bass) {
+      // 低音走根音；4 拍一格、节奏型是扫弦或低音+和弦时，第 3 拍再弹五音（根音-五音，最常见的低音线）
+      const root = bassMidi(ch);
+      if (s.beats === 4 && (opts.pattern === 'strum' || opts.pattern === 'boom')) {
+        ev.push({ t: t0, kind: 'bass', midi: root, dur: 2 * spb * 0.92, vol: 0.42, slot: i });
+        ev.push({ t: t0 + 2 * spb, kind: 'bass', midi: root + 7, dur: 2 * spb * 0.92, vol: 0.38, slot: i });
+      } else ev.push({ t: t0, kind: 'bass', midi: root, dur: s.beats * spb * 0.95, vol: 0.42, slot: i });
+    }
   });
   const bars = Math.round(slots.length * a.slot / beatsPerBar);
   for (let b = 0; b < bars; b++) {
-    const tb = b * beatsPerBar * spb;
-    if (L.drone) ev.push({ t: tb, kind: 'drone', midi: 36 + KEYS[a.key].tonic, dur: beatsPerBar * spb * 0.98, vol: 0.5 });
+    const tb = (pk + b * beatsPerBar) * spb;
+    if (L.drone) ev.push({ t: tb, kind: 'drone', midi: bassRegister(KEYS[a.key].tonic), dur: beatsPerBar * spb * 0.98, vol: 0.5 });
     if (L.drums) for (let k = 0; k < beatsPerBar; k++) {
-      if (k === 0 || (beatsPerBar === 4 && k === 2)) ev.push({ t: tb + k * spb, kind: 'kick', dur: 0.3, vol: 0.7 });
+      if (k === 0 || (beatsPerBar === 4 && k === 2)) ev.push({ t: tb + k * spb, kind: 'kick', dur: 0.3, vol: 0.6 });
       ev.push({ t: tb + k * spb, kind: 'hat', dur: 0.05, vol: k === 0 ? 0.2 : 0.13 });
     }
   }
   ev.sort((x, y) => x.t - y.t);
-  return { events: ev, total, spb, slots };
+  return { events: ev, total, spb, slots, pickup: pk };
 }
 
 /** 导出和弦谱：| C | G | Am F | …，每行 4 小节 */
@@ -180,6 +226,6 @@ export function chordChart(song, chords, extra = {}) {
   }
   const lines = [];
   for (let i = 0; i < bars.length; i += 4) lines.push('| ' + bars.slice(i, i + 4).join(' | ') + ' |');
-  const head = `${song.title}（${song.en}）  ${a.key} 大调  ${song.beats}/4` + (extra.bpm ? `  ♩=${extra.bpm}` : '') + (extra.pattern ? `  伴奏：${PATTERNS[extra.pattern].name}` : '');
+  const head = `${song.title}（${song.en}）  ${a.key} 大调  ${song.beats}/4` + (pickupOf(song) ? `  弱起 ${pickupOf(song)} 拍` : '') + (extra.bpm ? `  ♩=${extra.bpm}` : '') + (extra.pattern ? `  伴奏：${PATTERNS[extra.pattern].name}` : '');
   return head + '\n' + lines.join('\n') + '\n';
 }

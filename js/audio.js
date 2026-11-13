@@ -1,5 +1,6 @@
 // audio.js — 麦克风采集与节拍器（Web Audio API）
 import { CLICK } from './dsp.js';
+import { renderBass, BASS_TONES } from './bass.js';
 export class AudioEngine {
   constructor() {
     this.ctx = null; this.stream = null; this.source = null; this.node = null;
@@ -175,6 +176,34 @@ export class AudioEngine {
     if (ctx.state !== 'running') this.checkRunning();
     return src;
   }
+  /** 低音音色（见 bass.js），按 音色/音高/长度 缓存 */
+  _bassBuffer(tone, midi, seconds) {
+    this._bs = this._bs || new Map();
+    const key = `${tone}:${midi}:${seconds}`;
+    if (this._bs.has(key)) return this._bs.get(key);
+    const ctx = this.ctx, data = renderBass(tone, midi, ctx.sampleRate, seconds);
+    const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
+    if (buf.copyToChannel) buf.copyToChannel(data, 0); else buf.getChannelData(0).set(data);
+    this._bs.set(key, buf);
+    return buf;
+  }
+  /** 在时刻 t 弹一个低音；dur 秒后 50 ms 内止音（像手指按住弦止音，不会「咔」一声） */
+  bass(midi, t, dur = 1, vol = 0.6, tone = 'warm') {
+    const ctx = this.ensureContext();
+    const seconds = Math.max(2.5, Math.ceil((dur + 0.6) * 2) / 2);
+    const src = ctx.createBufferSource(), g = ctx.createGain();
+    src.buffer = this._bassBuffer(BASS_TONES[tone] ? tone : 'warm', midi, seconds);
+    t = t ?? ctx.currentTime + 0.02;
+    const v = vol * (BASS_TONES[tone] ? BASS_TONES[tone].gain : 1), end = t + Math.max(0.08, dur);
+    g.gain.setValueAtTime(v, t);
+    g.gain.setTargetAtTime(0, end, 0.05);
+    src.connect(g); g.connect(this.master);
+    src.start(t); src.stop(Math.min(t + seconds, end + 0.4));
+    if (ctx.state !== 'running') this.checkRunning();
+    return src;
+  }
+  /** 预先算好低音（打开编曲页时在空闲时间调用，第一次播放不卡） */
+  warmBass(tone, midis) { if (!this.ctx) return; for (const m of midis) this._bassBuffer(tone, m, 2.5); }
   onChunk(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   /** 取最近 n 个样本 */
   latest(n, out) {
