@@ -47,9 +47,9 @@ def internal(tag):
             pg.click(f"#bt-meter [data-v='{m}']"); pg.wait_for_timeout(80)
             out["n_pat_" + m] = pg.eval_on_selector_all("#bt-patterns .bt-pc", "e=>e.length")
         pg.click("#bt-patterns [data-id='e']")
-        pg.click("#mic-chip"); pg.wait_for_timeout(3500)
+        pg.click("#mic-chip"); pg.wait_for_timeout(4500)
         # 找到录音里「拍上」那一下的相位（它后面隔 345 ms，后半拍后面隔 255 ms）
-        phi = pg.evaluate("(()=>{const o=window.__on.slice(-10); for(let i=o.length-2;i>=1;i--){if(Math.abs(o[i+1]-o[i]-0.345)<0.02 && Math.abs(o[i]-o[i-1]-0.255)<0.02) return o[i];} return null;})()")
+        phi = pg.evaluate("(()=>{const o=window.__on, c=[]; for(let i=1;i<o.length-1;i++){if(Math.abs(o[i+1]-o[i]-0.345)<0.02 && Math.abs(o[i]-o[i-1]-0.255)<0.02) c.push(o[i]);} if(c.length<2) return null; const ref=c[c.length-1], d=c.map(t=>{let x=(t-ref)%0.6; if(x>0.3) x-=0.6; if(x<-0.3) x+=0.6; return x;}).sort((a,b)=>a-b); return ref+d[d.length>>1];})()")
         out["phase_found"] = phi is not None
         pg.click("#bt-start")
         pg.wait_for_function("window.__bt.beatDebug() && window.__bt.beatDebug().countStart !== undefined", timeout=5000)
