@@ -1,7 +1,7 @@
 // drawer.js — 设置与测试面板：所有调整都在这里，带实时反馈，不用切页面
 import { $, $$, settings, saveSettings, onSettings, markChecked, engine, metro, live, onPitch, onOnset, onMic, enableMic, disableMic,
   switchDevice, needMic, gateDb, noiseFloorDb, applyTheme, loadHistory, clearHistory, fmtC } from './core.js';
-import { estimateLatency, midiToFreq } from './dsp.js';
+import { runLoopback, loopbackMessage, listenExternal, externalMessage } from './latency.js';
 
 let isOpen = false;
 export function openDrawer() {
@@ -92,7 +92,8 @@ export function initDrawer() {
     setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   };
   $('#s-clear').onclick = () => { if (confirm('确定清空所有练习记录？')) { clearHistory(); location.reload(); } };
-  $('#s-cal-dots').innerHTML = Array.from({ length: 12 }, () => '<span></span>').join('');
+  $('#s-cal-dots').innerHTML = Array.from({ length: 8 }, () => '<span></span>').join('');
+  $('#s-ext').onclick = runExternalTest;
 
   // 实时读数
   onPitch((fr) => {
@@ -101,7 +102,6 @@ export function initDrawer() {
   });
   let blinkT = 0;
   onOnset((t) => {
-    if (cal.active) onCalOnset(t);
     if (!isOpen) return;
     $('#s-onsets').textContent = live.onsets;
     const b = $('#s-blink'); b.classList.add('on'); clearTimeout(blinkT); blinkT = setTimeout(() => b.classList.remove('on'), 150);
@@ -125,43 +125,23 @@ export function initDrawer() {
   requestAnimationFrame(loop);
 }
 
-// ---------- 延迟校准：80 BPM，4 下预备 + 12 下跟拨 ----------
-const cal = { active: false, onsets: [], expected: [] };
-function onCalOnset(t) { cal.onsets.push(t); markDot(t); }
-function markDot(t) {
-  let k = -1, best = 0.3;
-  cal.expected.forEach((e, i) => { const d = Math.abs(t - e); if (d < best) { best = d; k = i; } });
-  if (k >= 0) { const s = $$('#s-cal-dots span')[k]; s.classList.add('hit'); s.textContent = Math.round((t - cal.expected[k]) * 1000); }
-}
-async function runCalibration() {
-  if (cal.active) return;
-  if (!(await needMic())) return;
-  await engine.unlock();
-  const st = $('#s-cal-status'), dots = $$('#s-cal-dots span');
+// ---------- 设备延迟：回环自动测（喇叭 → 麦克风），不需要人跟拍 ----------
+export async function runCalibration() {
+  const st = $('#s-cal-status'), dots = $$('#s-cal-dots span'), btn = $('#s-cal');
   dots.forEach((d) => { d.className = ''; d.textContent = ''; });
-  const saved = { bpm: metro.bpm, beatsPerBar: metro.beatsPerBar, subdiv: metro.subdiv, sound: metro.sound, onTick: metro.onTick };
-  metro.stop();
-  Object.assign(metro, { bpm: 80, beatsPerBar: 4, subdiv: 1, sound: true, volume: Math.max(0.3, settings.volume) });
-  const start = metro.start(0.3), iv = metro.tickInterval;
-  cal.onsets = []; cal.expected = []; cal.active = true;
-  for (let i = 4; i < 16; i++) cal.expected.push(start + i * iv);
-  const end = start + 16 * iv + 0.3;
-  $('#s-cal').disabled = true;
-  metro.onTick = (time, info) => {
-    if (info.index >= 15) metro.stop();
-    setTimeout(() => {
-      if (!cal.active) return;
-      if (info.index < 4) st.textContent = `预备 ${4 - info.index}…`;
-      else { st.textContent = `跟着拨！还剩 ${15 - info.index} 下`; dots[info.index - 4].classList.add('tick'); }
-    }, Math.max(0, (time - engine.ctx.currentTime) * 1000));
-  };
-  st.textContent = '先听 4 下预备拍，然后每一下「嘀」拨一次闷音…';
-  await new Promise((res) => { const t = setInterval(() => { if (engine.lastFrameTime >= end) { clearInterval(t); res(); } }, 100); });
-  cal.active = false; $('#s-cal').disabled = false;
-  Object.assign(metro, saved);
-  const est = estimateLatency(cal.onsets.filter((o) => o > cal.expected[0] - 0.3), cal.expected, 300);
-  if (!est || est.n < 6) { st.textContent = `只检测到 ${est ? est.n : cal.onsets.length} 下，不够。弹响一点（电平条要过红线），或者把拨弦灵敏度调高再试。`; return; }
-  if (est.spreadMs > 40) { st.textContent = `拨弦时间太分散（±${Math.round(est.spreadMs)} ms），没有采用。跟紧拍子再测一次。`; return; }
-  settings.latencyMs = Math.round(est.latencyMs); markChecked('cal'); saveSettings();
-  st.textContent = `✓ 校准完成：延迟 ${settings.latencyMs} ms（${est.n} 下，离散 ±${Math.round(est.spreadMs)} ms）${est.spreadMs > 20 ? '，离散偏大，可以再测一次' : ''}`;
+  btn.disabled = true; st.textContent = '准备…保持安静，不用弹琴';
+  const est = await runLoopback({ onProgress: (i, n) => { if (i >= 0) { dots[i] && dots[i].classList.add('tick'); st.textContent = `正在放测试音 ${i + 1}/${n}…`; } } });
+  btn.disabled = false;
+  if (est.lagsMs) est.lagsMs.forEach((v, i) => { const d = dots[i]; if (!d) return; d.classList.remove('tick'); if (v === null) { d.classList.add('miss'); d.textContent = '×'; } else { d.classList.add('hit'); d.textContent = Math.round(v); } });
+  st.textContent = loopbackMessage(est);
+  return est;
+}
+// ---------- 外部节拍器测试 ----------
+async function runExternalTest() {
+  const btn = $('#s-ext'), st = $('#s-ext-status'), box = $('#s-ext-dots');
+  btn.disabled = true; box.innerHTML = ''; st.textContent = '在听…（8 秒，别弹琴）'; $('#s-ext-n').textContent = '';
+  const r = await listenExternal({ seconds: 8, onClick: (t, n) => { $('#s-ext-n').textContent = n + ' 下'; box.insertAdjacentHTML('beforeend', '<span class="hit"></span>'); } });
+  btn.disabled = false;
+  if (r.ok) box.innerHTML = r.residualsMs.map((e) => `<span class="${Math.abs(e) < 3 ? 'hit' : Math.abs(e) < 8 ? 'warn' : 'miss'}" title="${e.toFixed(1)} ms">${e >= 0 ? '+' : ''}${e.toFixed(0)}</span>`).join('');
+  st.textContent = externalMessage(r);
 }
