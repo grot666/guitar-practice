@@ -204,6 +204,22 @@ export class AudioEngine {
   }
   /** 预先算好低音（打开编曲页时在空闲时间调用，第一次播放不卡） */
   warmBass(tone, midis) { if (!this.ctx) return; for (const m of midis) this._bassBuffer(tone, m, 2.5); }
+  /** 在时刻 t 播放一段样本（回环延迟测量的测试音） */
+  playSamples(data, t, vol = 0.8) {
+    const ctx = this.ensureContext();
+    const buf = ctx.createBuffer(1, data.length, ctx.sampleRate);
+    if (buf.copyToChannel) buf.copyToChannel(data, 0); else buf.getChannelData(0).set(data);
+    const src = ctx.createBufferSource(), g = ctx.createGain(); g.gain.value = vol;
+    src.buffer = buf; src.connect(g); g.connect(this.master); src.start(t);
+    return src;
+  }
+  /** 很短的提示音（节奏训练的「听觉反馈」）；频率放在 2.4–3.6 kHz，外放模式的起音检测会忽略它 */
+  blip(freq = 3000, vol = 0.25, t) {
+    const ctx = this.ensureContext(); t = t ?? ctx.currentTime + 0.005;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = freq; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.08);
+  }
   onChunk(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   /** 取最近 n 个样本 */
   latest(n, out) {
@@ -222,6 +238,8 @@ export class Metronome {
     this.bpm = 80; this.beatsPerBar = 4; this.subdiv = 1; this.accent = true; this.sound = true; this.volume = 0.7;
     this.running = false; this.timer = null;
     this.onTick = null; // (time, {bar, beat, sub, index}) 每个细分点触发（已排程时间）
+    this.gate = null;   // (info) → 这一下响不响（节奏训练的「只响 2、4 拍」「隔小节静音」）；null = 全响
+    this.pendingBpm = 0;
   }
   get tickInterval() { return 60 / this.bpm / this.subdiv; }
   /** 运行中改速度/细分：以下一拍为基准重新对齐，避免时间轴跳变 */
@@ -251,8 +269,10 @@ export class Metronome {
     while (this.running && this.nextTime < ctx.currentTime + 0.12) {
       const perBar = this.beatsPerBar * this.subdiv;
       const inBar = this.index % perBar;
+      // 节奏训练的速度阶梯：新速度只在小节开头生效，当前小节不会被截断或拉长
+      if (inBar === 0 && this.pendingBpm) { this.bpm = this.pendingBpm; this.pendingBpm = 0; this.startTime = this.nextTime - this.index * this.tickInterval; }
       const info = { index: this.index, bar: Math.floor(this.index / perBar), beat: Math.floor(inBar / this.subdiv), sub: inBar % this.subdiv };
-      if (this.sound) this._click(this.nextTime, info);
+      if (this.sound && (!this.gate || this.gate(info))) this._click(this.nextTime, info);
       this.onTick && this.onTick(this.nextTime, info);
       this.index++;
       this.nextTime = this.startTime + this.index * this.tickInterval; // 用乘法避免累积误差
