@@ -7,6 +7,7 @@ import { drawBoard } from './fretboard.js';
 import { openPractice, closePractice } from './practice.js';
 import { openDrawer, initDrawer } from './drawer.js';
 import { openArrange, closeArrange } from './arrange.js';
+import { openBeat, closeBeat } from './beat.js';
 
 applyTheme();
 initDrawer();
@@ -30,7 +31,7 @@ $('#mic-chip').onclick = async () => { if (engine.micOn) disableMic(); else { aw
 })();
 
 // ---------- 路由 ----------
-const TITLES = { home: '吉他练习', tuner: '调音', songs: '练曲子', frets: '认识指板', rhythm: '节奏', history: '练习记录', play: '练习', arrange: '编曲入门' };
+const TITLES = { home: '吉他练习', tuner: '调音', songs: '练曲子', frets: '认识指板', rhythm: '节拍器', beat: '节奏训练', history: '练习记录', play: '练习', arrange: '编曲入门' };
 let curView = '';
 let drill = null;
 function route() {
@@ -39,6 +40,7 @@ function route() {
   if (curView === 'play' && view !== 'play') closePractice();
   if (curView === 'rhythm' && view !== 'rhythm') stopRhythmAll();
   if (curView === 'arrange' && view !== 'arrange') closeArrange();
+  if (curView === 'beat' && view !== 'beat') closeBeat();
   $$('.view').forEach((v) => (v.hidden = v.id !== 'v-' + view));
   $('#result').hidden = true;
   curView = view;
@@ -49,6 +51,7 @@ function route() {
   if (view === 'songs') renderSongs();
   if (view === 'history') renderHistory();
   if (view === 'arrange') openArrange();
+  if (view === 'beat') openBeat();
   if (view === 'play') {
     if (arg === 'drill') { if (!drill) drill = makeDrillFromUI(); openPractice(drill.song, { drill: true, names: drill.names, onDone: () => { drill = makeDrillFromUI(); } }); }
     else {
@@ -82,6 +85,7 @@ function histItem(e) {
     const href = e.type === 'drill' ? '#frets' : '#play/' + e.id;
     return `<a class="item" href="${href}"><span class="num">${e.type === 'drill' ? '▦' : '♪'}</span><span class="meta"><b>${esc(e.title)}</b><small>${detail}</small></span><span class="side"><span class="stars-s">${STARS(e.stars || 0)}</span><br>${when}</span></a>`;
   }
+  if (e.type === 'beat') return `<a class="item" href="#beat"><span class="num">◉</span><span class="meta"><b>节奏训练 · ${esc(e.name || '')}</b><small>${esc(e.meter || '')} · ${e.src === 'external' ? '外部节拍器 ' : ''}${e.bpm}${e.endBpm && e.endBpm !== e.bpm ? '→' + e.endBpm : ''} BPM · 准确率 ${pct(e.accuracy || 0)} · ±${Math.round(e.stdMs || 0)}ms${e.drill ? ' · 专项' : ''}</small></span><span class="side">${when}</span></a>`;
   if (e.type === 'rhythm') return `<a class="item" href="#rhythm"><span class="num">◔</span><span class="meta"><b>节奏测试</b><small>${esc(e.name || '')} · 准确率 ${pct(e.accuracy || 0)}</small></span><span class="side">${when}</span></a>`;
   return `<div class="item"><span class="num">·</span><span class="meta"><b>${esc(e.name || e.type || '练习')}</b><small>旧版记录</small></span><span class="side">${when}</span></div>`;
 }
