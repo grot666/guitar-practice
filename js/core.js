@@ -1,6 +1,6 @@
 // core.js — 全局状态：设置、存储、音频引擎、麦克风、音高/起音数据流
 import { AudioEngine, Metronome } from './audio.js';
-import { detectPitch, noteFromFreq, centsBetween, OnsetDetector, rms, SPEAKER_BAND } from './dsp.js';
+import { detectPitch, noteFromFreq, centsBetween, OnsetDetector, rms, SPEAKER_BAND, PITCH_MIN_FREQ, PITCH_MAX_FREQ } from './dsp.js';
 
 export const $ = (s, el = document) => el.querySelector(s);
 export const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
@@ -82,7 +82,7 @@ function startLoop() {
     engine.latest(N, buf);
     const level = rms(buf, N - 1024);
     live.db = level > 0 ? 20 * Math.log10(level) : -100;
-    const r = detectPitch(buf, sr, { rmsGate: gateRms(), minFreq: 60, maxFreq: 1400, _scratch: scratch });
+    const r = detectPitch(buf, sr, { rmsGate: gateRms(), minFreq: PITCH_MIN_FREQ, maxFreq: PITCH_MAX_FREQ, _scratch: scratch });
     if (r) {
       if (hist.length && Math.abs(centsBetween(r.freq, median(hist))) > 80) hist.length = 0;
       hist.push(r.freq); if (hist.length > 5) hist.shift();

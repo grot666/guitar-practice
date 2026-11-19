@@ -1,5 +1,5 @@
 import { synthClick, CLICK, SPEAKER_BAND, detectPitch, noteFromFreq, midiToFreq, detectOnsetsOffline, matchOnsets, summarizeRhythm, estimateLatency, NoteSequenceTracker, parseNoteName } from '../js/dsp.js';
-import { sine, harmonic, pluck, addNoise, mixAt, click, rng } from './synth.mjs';
+import { sine, harmonic, pluck, addNoise, addRumble, addAM, onePoleHP, onePoleLP, mixAt, click, rng } from './synth.mjs';
 
 let fails = 0;
 const ok = (cond, msg) => { if (!cond) { fails++; console.log('  ✗ ' + msg); } };
@@ -256,6 +256,105 @@ console.log('== 15. 止音（每个音 0.4s 后 20ms 内被手掌按停）不应
   const a = onsetReport('耳机模式', sig, truth);
   const b = onsetReport('外放模式', sig, truth, SPEAKER_BAND);
   ok(a.s.extra === 0 && b.s.extra === 0 && a.s.missed === 0 && b.s.missed === 0, '止音不应误报');
+}
+
+
+console.log('== 16. 音高检测：C4 / 二弦一品 在低频嗡声与幅度调制下不应听成 C2');
+{
+  const notes = [59, 60, 62, 64, 67]; // B3, C4, D4, E4, G4
+  let bad = 0, n = 0, worst = 0;
+  const report = [];
+  function check(label, sig, sr, win, wantF, offSec = 0.08) {
+    const off = Math.round(offSec * sr);
+    const r = detectPitch(sig.subarray(off, off + win), sr);
+    n++;
+    const c = r ? Math.abs(cents(r.freq, wantF)) : Infinity;
+    const got = r ? (noteFromFreq(r.freq).name + noteFromFreq(r.freq).octave) : 'null';
+    if (!r || c > 50) { bad++; report.push(`${label} -> ${got} (${r ? r.freq.toFixed(1) : '-'} Hz, ${Number.isFinite(c) ? c.toFixed(0) + 'c' : '无'})`); }
+    else worst = Math.max(worst, c);
+  }
+  for (const sr of [48000, 44100]) {
+    for (const win of [2048, 4096]) {
+      for (const m of notes) {
+        const f = midiToFreq(m);
+        const { x } = pluck(f, 1.2, sr, 0.6, 60);
+        for (const amp of [0.05, 0.12]) {
+          check(`pluck ${m} + ${m - 24} rumble amp=${amp} @${sr}/${win}`, addRumble(x, sr, midiToFreq(m - 24), amp), sr, win, f);
+        }
+      }
+      const fC4 = midiToFreq(60);
+      const { x } = pluck(fC4, 1.2, sr, 0.6, 60);
+      for (const hz of [60, 65, 70]) {
+        check(`pluck C4 + ${hz}Hz rumble 0.12 @${sr}/${win}`, addRumble(x, sr, hz, 0.12), sr, win, fC4);
+      }
+      check(`pluck C4 AM 65Hz d=0.5 @${sr}/${win}`, addAM(x, sr, 65.41, 0.5), sr, win, fC4);
+      check(`sine C4 AM 65Hz d=0.6 @${sr}/${win}`, addAM(sine(fC4, 1.2, sr, 0.4), sr, 65.41, 0.6), sr, win, fC4);
+      const xn = pluck(fC4, 1.2, sr, 0.7, 60).x;
+      addNoise(xn, 0.01, 3);
+      const phone = addRumble(onePoleLP(onePoleHP(xn, sr, 80), sr, 3000), sr, 65, 0.1);
+      check(`phone HP80+LP3000+rumble0.1 C4 @${sr}/${win}`, phone, sr, win, fC4);
+    }
+  }
+  // 二弦一品（MIDI 60）干净拨弦，不只测空弦/5/12
+  {
+    const f = midiToFreq(60);
+    const { x } = pluck(f, 1.2, SR, 0.6, 11);
+    addNoise(x, 0.005, 11);
+    for (const off of [2400, 4800, 9600]) {
+      check(`B-string fret 1 clean off=${off}`, x, SR, WIN, f, off / SR);
+    }
+  }
+  if (report.length) console.log('  失败样例：\n   ' + report.join('\n   '));
+  console.log(`  ${n} 帧，错误 ${bad}，最大误差 ${worst.toFixed(2)} 音分`);
+  ok(bad === 0 && worst < 50, '嗡声/调制下应识别为原音（±50 音分），不能是次谐波');
+}
+
+console.log('== 17. 音高检测：干净的低音弦不得被向上折八度');
+{
+  let bad = 0, n = 0, worst = 0;
+  for (const m of [40, 41, 42, 43, 45]) { // E2 F2 F#2 G2 A2
+    const f = midiToFreq(m);
+    for (const [lab, sig] of [
+      ['sine', sine(f, 1.0, SR, 0.4)],
+      ['harm', harmonic(f, 1.0, SR)],
+      ['pluck', pluck(f, 1.2, SR, 0.6, 7).x],
+    ]) {
+      const r = detectPitch(sig.subarray(4800, 4800 + WIN), SR);
+      n++;
+      const c = r ? Math.abs(cents(r.freq, f)) : Infinity;
+      if (!r || c > 50) {
+        bad++;
+        const got = r ? (noteFromFreq(r.freq).name + noteFromFreq(r.freq).octave) : 'null';
+        console.log(`  ✗ ${noteFromFreq(f).name}${noteFromFreq(f).octave} ${lab} -> ${got}`);
+      } else worst = Math.max(worst, c);
+    }
+  }
+  console.log(`  ${n} 帧，错误 ${bad}，最大误差 ${worst.toFixed(2)} 音分`);
+  ok(bad === 0, 'E2/F2 等低音不得被折高八度');
+}
+
+console.log('== 18. 跟踪器：中途改容差立即生效；1–2 个八度误判在未开「高低八度」时仍算对');
+{
+  const f30 = midiToFreq(60) * Math.pow(2, 30 / 1200);
+  const tr = new NoteSequenceTracker([60], { tolCents: 20, stableFrames: 3, octaveFree: false });
+  let ev = null;
+  for (let i = 0; i < 3; i++) ev = tr.update({ freq: f30, time: i });
+  ok(ev && ev.type === 'miss' && Math.abs(ev.cents - 30) < 0.1, '容差 20 时应判 30 音分偏差为错');
+  tr.tol = 40;
+  ev = null;
+  tr.update({ freq: null, time: 3 }); tr.update({ freq: null, time: 4 }); // 解锁
+  for (let i = 0; i < 3; i++) ev = tr.update({ freq: f30, time: 5 + i });
+  ok(ev && ev.type === 'hit' && Math.abs(ev.cents - 30) < 0.1, '把容差改成 40 后应立刻接受 30 音分偏差');
+
+  const tr2 = new NoteSequenceTracker([60], { tolCents: 20, stableFrames: 3, octaveFree: false });
+  ev = null;
+  for (let i = 0; i < 3; i++) ev = tr2.update({ freq: midiToFreq(36), time: i }); // C2
+  ok(ev && ev.type === 'hit' && Math.abs(ev.cents) < 1, '目标 C4、听到 C2 时应折回同音名并算对（安全网）');
+
+  const tr3 = new NoteSequenceTracker([64], { tolCents: 20, stableFrames: 3, octaveFree: false });
+  ev = null;
+  for (let i = 0; i < 3; i++) ev = tr3.update({ freq: midiToFreq(40), time: i }); // E2 vs E4
+  ok(ev && ev.type === 'hit' && Math.abs(ev.cents) < 1, '目标 E4、听到 E2 时应折回并算对');
 }
 
 console.log(fails ? `\n失败 ${fails} 项` : '\n全部通过');
