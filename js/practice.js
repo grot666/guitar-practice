@@ -1,7 +1,7 @@
 // practice.js — 练曲子 / 认识指板 的练习界面：滚动六线谱、指板提示、音高判定、「等我」和「跟拍」两种模式
-import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, addHistory, css, fmtC, pct, posText } from './core.js';
+import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, onSettings, addHistory, css, fmtC, pct, posText } from './core.js';
 import { parseSong } from './songs.js';
-import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, matchOnsets, summarizeRhythm, noteFromFreq } from './dsp.js';
+import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, matchOnsets, summarizeRhythm, noteFromFreq, snapCents } from './dsp.js';
 import { drawBoard, markBoard } from './fretboard.js';
 
 let S = null;          // 当前练习
@@ -40,6 +40,13 @@ function resetRun() {
   S.idx = 0; S.pos = S.pitched[0].start; S.onsets = []; S.startedAt = 0;
   S.tracker = new NoteSequenceTracker(S.pitched.map((n) => n.midi), { tolCents: settings.tolCents, stableFrames: 3, a4: settings.a4, octaveFree: settings.octaveFree || S.names }); // 只看音名：任何八度都算对
 }
+function syncTrackerSettings() {
+  if (!S || !S.tracker) return;
+  S.tracker.tol = settings.tolCents;
+  S.tracker.a4 = settings.a4;
+  S.tracker.octaveFree = settings.octaveFree || S.names;
+}
+onSettings(syncTrackerSettings);
 
 function stopAll() {
   if (!S) return;
@@ -136,9 +143,8 @@ function judgeAlong(k) {
 }
 const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
 function centsTo(freq, midi) {
-  let c = centsBetween(freq, midiToFreq(midi, settings.a4));
-  if (settings.octaveFree) c -= 1200 * Math.round(c / 1200);
-  return c;
+  // 未勾选「高/低八度也算对」时，仍折回 1–2 个八度的同音名误判（C4 听成 C2 等）
+  return snapCents(centsBetween(freq, midiToFreq(midi, settings.a4)), settings.octaveFree);
 }
 
 // ---------- 数据输入 ----------
@@ -156,7 +162,8 @@ onPitch((fr) => {
   } else { $('#p-heard-note').textContent = '—'; $('#p-heard-c').textContent = ''; }
   if (!S.running || S.demo) { onsetPending = false; return; }
   if (S.mode === 'along') { alongFrame(fr); return; }
-  // 等我模式
+  // 等我模式（容差 / 标准音 / 八度选项中途改了立刻生效）
+  syncTrackerSettings();
   const ev = S.tracker.update({ freq: fr.raw, time: fr.time, onset: onsetPending });
   onsetPending = false;
   if (!ev) return;
