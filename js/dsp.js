@@ -58,13 +58,32 @@ export function rms(buf, start = 0, end = buf.length) {
   return Math.sqrt(s / Math.max(1, end - start));
 }
 
+/** 标准调弦六弦吉他音域下限附近：略低于 E2（82.4 Hz），排除 C2（65.4 Hz） */
+export const PITCH_MIN_FREQ = 75;
+export const PITCH_MAX_FREQ = 1400;
+
+/** 抛物线插值 NSDF 峰值，得到更精确的周期与峰值高度 */
+function interpPeak(nsdf, t) {
+  const a = nsdf[t - 1], b = nsdf[t], c = nsdf[t + 1] ?? b;
+  const denom = a - 2 * b + c;
+  let shift = 0, val = b;
+  if (Math.abs(denom) > 1e-12) {
+    shift = (0.5 * (a - c)) / denom;
+    if (shift > 1 || shift < -1) shift = 0;
+    val = b - 0.25 * (a - c) * shift;
+  }
+  return { tau: t + shift, val };
+}
+
 /**
  * McLeod Pitch Method（NSDF + 关键极大值 + 抛物线插值）
+ * 额外做次谐波/八度校正：低频嗡声或幅度调制会把 4τ（低两个八度）抬成全局最大，
+ * 甚至把第一次负过零推到真周期之后。选出的音如果低于乐器音域，折到域内更高的峰。
  * @returns {{freq:number, clarity:number, rms:number}|null}
  */
 export function detectPitch(buf, sampleRate, opts = {}) {
-  const minFreq = opts.minFreq ?? 60;
-  const maxFreq = opts.maxFreq ?? 1400;
+  const minFreq = opts.minFreq ?? PITCH_MIN_FREQ;
+  const maxFreq = opts.maxFreq ?? PITCH_MAX_FREQ;
   const k = opts.k ?? 0.9;
   const minClarity = opts.minClarity ?? 0.8;
   const gate = opts.rmsGate ?? 0.005;
@@ -78,7 +97,9 @@ export function detectPitch(buf, sampleRate, opts = {}) {
   const x = opts._scratch && opts._scratch.length >= N ? opts._scratch : new Float32Array(N);
   for (let i = 0; i < N; i++) x[i] = buf[i] - mean;
 
-  const maxTau = Math.min(Math.floor(sampleRate / minFreq), Math.floor(N / 2));
+  // 分析下限略低于判定下限，以便看到 C2 这类次谐波峰，再折回到乐器音域
+  const analysisMinFreq = Math.min(minFreq, 55);
+  const maxTau = Math.min(Math.floor(sampleRate / analysisMinFreq), Math.floor(N / 2));
   const minTau = Math.max(2, Math.floor(sampleRate / maxFreq));
   const nsdf = new Float32Array(maxTau + 2);
   // m(tau) 递推：m(0)=2*Σx²，m(tau)=m(tau-1)-x[tau-1]²-x[N-tau]²
@@ -92,9 +113,10 @@ export function detectPitch(buf, sampleRate, opts = {}) {
     nsdf[tau] = m > 1e-12 ? (2 * r) / m : 0;
   }
   // 关键极大值：每段正区间（从第一次负过零之后）取最大
-  const peaks = [];
+  const keyTaus = [];
   let tau = 1;
   while (tau <= maxTau && nsdf[tau] > 0) tau++; // 跳过 0 附近的正区间
+  const firstNeg = tau;
   let inPos = false, bestT = -1, bestV = -Infinity;
   for (; tau <= maxTau; tau++) {
     const v = nsdf[tau];
@@ -103,32 +125,108 @@ export function detectPitch(buf, sampleRate, opts = {}) {
       else if (v > bestV) { bestV = v; bestT = tau; }
     } else if (inPos) {
       inPos = false;
-      peaks.push(bestT);
+      keyTaus.push(bestT);
     }
   }
-  if (inPos && bestT > 0) peaks.push(bestT);
-  if (!peaks.length) return null;
-  let globalMax = 0;
-  for (const p of peaks) if (nsdf[p] > globalMax) globalMax = nsdf[p];
-  const thr = k * globalMax;
-  let chosen = -1;
-  for (const p of peaks) {
-    if (p >= minTau && nsdf[p] >= thr) { chosen = p; break; }
+  if (inPos && bestT > 0) keyTaus.push(bestT);
+
+  const peakAt = (t) => {
+    const { tau: pTau, val } = interpPeak(nsdf, t);
+    return { t, tau: pTau, val, freq: sampleRate / pTau };
+  };
+  const keyPeaks = keyTaus.map(peakAt);
+  // 局部极大：第一次负过零若晚于真周期，真峰会被算进 lag-0 正区间而漏掉；后面按 2f/4f 补回来
+  const localPeaks = [];
+  for (let t = minTau; t <= maxTau; t++) {
+    const v = nsdf[t];
+    if (v > 0 && v > nsdf[t - 1] && v >= nsdf[t + 1]) localPeaks.push(peakAt(t));
   }
-  if (chosen < 0) return null;
-  // 抛物线插值
-  const a = nsdf[chosen - 1], b = nsdf[chosen], c = nsdf[chosen + 1] ?? b;
-  const denom = a - 2 * b + c;
-  let shift = 0, peakVal = b;
-  if (Math.abs(denom) > 1e-12) {
-    shift = (0.5 * (a - c)) / denom;
-    if (shift > 1 || shift < -1) shift = 0;
-    peakVal = b - 0.25 * (a - c) * shift;
+
+  const TAU_TOL = 0.03; // 约 50 音分
+  const nearTau = (peaks, target) => {
+    let best = null, bestErr = Infinity;
+    for (const p of peaks) {
+      const err = Math.abs(p.tau - target) / target;
+      if (err < TAU_TOL && err < bestErr) { best = p; bestErr = err; }
+    }
+    return best;
+  };
+  // 次谐波校正：低频嗡声会把 4τ 抬成最强峰，真峰 NSDF 可能只有 0.3–0.6。
+  // 只对「足够强」的低频父峰（低于约 C#3 且 NSDF≥0.8）找 4f，避免把 3τ 旁瓣（如 G4 下的 C3）再抬成 C5。
+  const SUB_MAX = 140; // Hz
+  const SUB_4F = 0.25; // 干净低音弦的 4f NSDF < 0.18，嗡声下的真峰可低至约 0.29
+  const STRONG = 0.8;
+  // 4f 校正触发条件（二者满足其一）：
+  // - 第一次负过零较晚：嗡声把真周期吞进 lag-0 或紧挨着它（真峰 NSDF 可能只有 0.3–0.5）
+  // - 或 4f 峰相对父峰足够强（嗡声较轻时可达 0.73+；干净拨弦的 4f/基频 ≤ 0.47）
+  const lateZero = firstNeg > sampleRate / 800;
+  const extras = [];
+  let hasStrong4f = false;
+  for (const kp of keyPeaks) {
+    const h2 = nearTau(localPeaks, kp.tau / 2);
+    const h4 = nearTau(localPeaks, kp.tau / 4);
+    if (kp.freq < SUB_MAX && kp.val >= STRONG) {
+      // 2τ 峰（如 A2 的 A1）自身 NSDF 也接近 1，它的 2f 才是真基频；此时不要跳到 4f（A3）
+      if (h2 && h2.val >= STRONG) extras.push(h2);
+      else if (h4 && h4.val >= SUB_4F && (lateZero || h4.val >= 0.6 * kp.val)) {
+        extras.push(h4); hasStrong4f = true;
+      }
+    } else if (h2 && h2.val >= STRONG) {
+      extras.push(h2);
+    }
   }
-  const period = chosen + shift;
-  const freq = sampleRate / period;
-  if (peakVal < minClarity || freq < minFreq || freq > maxFreq) return null;
-  return { freq, clarity: peakVal, rms: level };
+
+  const seen = new Set();
+  const all = [];
+  for (const p of keyPeaks.concat(extras)) {
+    if (seen.has(p.t)) continue;
+    seen.add(p.t);
+    all.push(p);
+  }
+  if (!all.length) return null;
+
+  // 若已按 4f 校正过强低频峰，把整个次谐波频段从候选里拿掉（含 F2 这类 3τ 旁瓣）
+  const suppressed = new Set();
+  for (const p of all) {
+    if (p.freq < SUB_MAX && hasStrong4f) suppressed.add(p.t);
+  }
+  const inRange = all.filter((p) => p.freq >= minFreq && p.freq <= maxFreq);
+  const usable = inRange.filter((p) => !suppressed.has(p.t));
+  const pool = (usable.length ? usable : inRange.length ? inRange : all).slice().sort((a, b) => a.tau - b.tau);
+  let rangeMax = 0;
+  for (const p of pool) if (p.val > rangeMax) rangeMax = p.val;
+  const thr = k * rangeMax;
+  // 在判定范围内：取超过阈值的最短周期（最高频率）
+  let chosen = null;
+  for (const p of pool) {
+    if (p.val >= thr) { chosen = p; break; }
+  }
+  if (!chosen) return null;
+
+  // 仍低于乐器音域：按八度上折，优先落到真实存在的更高峰
+  if (chosen.freq < minFreq) {
+    let folded = null;
+    for (const ratio of [4, 2]) {
+      const hp = nearTau(localPeaks, chosen.tau / ratio);
+      if (hp && hp.freq >= minFreq && hp.freq <= maxFreq && hp.val >= SUB_4F) { folded = hp; break; }
+    }
+    if (folded) chosen = folded;
+    else {
+      let f = chosen.freq;
+      while (f * 2 <= maxFreq && f < minFreq) f *= 2;
+      chosen = { ...chosen, freq: f };
+    }
+  }
+
+  // 周期置信度看相关峰（含被抑制的次谐波）的最大 NSDF，避免真峰因 0.5 左右的 NSDF 被 minClarity 丢掉
+  let clarity = chosen.val;
+  for (const p of keyPeaks.concat(all)) {
+    const ratio = chosen.freq / p.freq;
+    if (Math.abs(ratio - 1) < 0.08 || Math.abs(ratio - 2) < 0.08 || Math.abs(ratio - 4) < 0.08)
+      clarity = Math.max(clarity, p.val);
+  }
+  if (clarity < minClarity || chosen.freq < minFreq || chosen.freq > maxFreq) return null;
+  return { freq: chosen.freq, clarity, rms: level };
 }
 
 // ---------------- FFT（基 2，原地） ----------------
@@ -419,8 +517,20 @@ export function estimateLatency(onsets, expected, windowMs = 250) {
 }
 
 /**
+ * 把测得音与目标音的音分差折到可比较的范围。
+ * octaveFree：任意八度都只看音名；否则仅折回 1 或 2 个八度的同音名误判（检测器把 C4 听成 C2 时的安全网）。
+ */
+export function snapCents(c, octaveFree = false, maxOct = 2) {
+  if (octaveFree) return c - 1200 * Math.round(c / 1200);
+  const oct = Math.round(c / 1200);
+  if (oct !== 0 && Math.abs(oct) <= maxOct) return c - 1200 * oct;
+  return c;
+}
+
+/**
  * 音准练习跟踪器：逐帧喂入音高结果，判断是否按顺序弹中目标音
  * update({freq|null, time, onset:boolean}) → 事件 {type:'hit'|'miss', ...} 或 null
+ * tol / a4 / octaveFree 是可变字段，练习中途改设置会立即生效。
  */
 export class NoteSequenceTracker {
   constructor(targets, opts = {}) {
@@ -459,8 +569,7 @@ export class NoteSequenceTracker {
     const fs = this.candFreqs.slice().sort((a, b) => a - b);
     const f = fs[fs.length >> 1];
     const target = this.targets[this.idx];
-    let c = centsBetween(f, midiToFreq(target, this.a4));
-    if (this.octaveFree) c = c - 1200 * Math.round(c / 1200);
+    const c = snapCents(centsBetween(f, midiToFreq(target, this.a4)), this.octaveFree);
     this.locked = true; this.lockedMidi = midi; this.candMidi = null; this.candFreqs = [];
     const r = this.results[this.idx];
     r.attempts++; this.attempts++;

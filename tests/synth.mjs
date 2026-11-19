@@ -49,3 +49,33 @@ export function click(sr, amp = 0.8, ms = 3) {
   for (let i = 0; i < n; i++) x[i] = amp * Math.sin((2 * Math.PI * 2000 * i) / sr) * (1 - i / n);
   return x;
 }
+
+/** 叠加低频嗡声（模拟手机手振 / 桌面共振 / 电流声） */
+export function addRumble(x, sr, f, amp) {
+  const y = x.slice();
+  for (let i = 0; i < y.length; i++) y[i] += amp * Math.sin((2 * Math.PI * f * i) / sr);
+  return y;
+}
+/** 幅度调制 */
+export function addAM(x, sr, f, depth) {
+  const y = x.slice();
+  for (let i = 0; i < y.length; i++) y[i] *= 1 + depth * Math.sin((2 * Math.PI * f * i) / sr);
+  return y;
+}
+export function onePoleHP(x, sr, fc) {
+  const y = new Float32Array(x.length);
+  const a = Math.exp(-2 * Math.PI * fc / sr);
+  let prevX = 0, prevY = 0;
+  for (let i = 0; i < x.length; i++) {
+    y[i] = a * (prevY + x[i] - prevX);
+    prevX = x[i]; prevY = y[i];
+  }
+  return y;
+}
+export function onePoleLP(x, sr, fc) {
+  const y = new Float32Array(x.length);
+  const a = Math.exp(-2 * Math.PI * fc / sr);
+  let z = 0;
+  for (let i = 0; i < x.length; i++) { z = (1 - a) * x[i] + a * z; y[i] = z; }
+  return y;
+}
