@@ -192,14 +192,14 @@ console.log('== 6. 接入代表性判定：音准跟踪器（含八度折回）+
 {
   const now = clock();
   const log = createLogger({ now });
-  log.start({ settings: { tolCents: 30, octaveFree: false, a4: 440 } });
+  log.start({ settings: { tolCents: 30, octaveFree: true, a4: 440 } });
 
   // 等我模式：目标 C4，检测器给出 C2（低两个八度）——这是真实会出现的误判
-  const tracker = new NoteSequenceTracker([60], { tolCents: 30, stableFrames: 3, a4: 440, octaveFree: false });
+  const tracker = new NoteSequenceTracker([60], { tolCents: 30, stableFrames: 3, a4: 440, octaveFree: true });
   const fC2 = midiToFreq(36);
   let ev = null;
   for (let i = 0; i < 4; i++) ev = tracker.update({ freq: fC2, time: i * 0.04, onset: i === 0 }) || ev;
-  ok(ev && ev.type === 'hit', 'C2 对目标 C4 经 snapCents 后应判 hit（现有八度安全网）');
+  ok(ev && ev.type === 'hit', 'C2 对目标 C4 经 snapCents 后应判 hit（音名模式）');
   const raw = centsBetween(ev.freq, midiToFreq(60));
   const snapped = ev.cents;
   const oct = Math.round((raw - snapped) / 1200);
@@ -207,17 +207,17 @@ console.log('== 6. 接入代表性判定：音准跟踪器（含八度折回）+
   log.log('score', {
     mode: 'wait', decision: ev.type, index: ev.index, targetMidi: 60, targetName: 'C4',
     freq: ev.freq, playedMidi: 36, cents: snapped, centsRaw: raw, octaveSnap: oct,
-    tolCents: 30, octaveFree: false,
+    tolCents: 30, octaveFree: true,
   });
 
-  // 跟拍窗口：多数帧在容差外
+  // 跟拍窗口：启用音名模式
   const frames = [-2400, -2395, 12, 8, 5].map((c) => c);
-  const good = frames.filter((c) => Math.abs(snapCents(c, false)) <= 30);
+  const good = frames.filter((c) => Math.abs(snapCents(c, true)) <= 30);
   const okAlong = good.length >= Math.max(1, Math.ceil(frames.length * 0.3));
   log.log('score', {
     mode: 'along', decision: okAlong ? 'hit' : 'miss', index: 0, targetMidi: 60, targetName: 'C4',
     frames: frames.length, good: good.length, need: Math.max(1, Math.ceil(frames.length * 0.3)),
-    tolCents: 30, octaveFree: false,
+    tolCents: 30, octaveFree: true,
   });
   ok(okAlong, '跟拍在折回后应有足够好帧');
 

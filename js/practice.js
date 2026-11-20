@@ -1,7 +1,7 @@
 // practice.js — 练曲子 / 认识指板 的练习界面：滚动六线谱、指板提示、音高判定、「等我」和「跟拍」两种模式
 import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, onSettings, addHistory, css, fmtC, pct, posText } from './core.js';
 import { parseSong } from './songs.js';
-import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, matchOnsets, summarizeRhythm, noteFromFreq, snapCents } from './dsp.js';
+import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, matchOnsets, summarizeRhythm, noteFromFreq, pitchWindowVerdict, snapCents } from './dsp.js';
 import { diag, logDiag } from './diag.js';
 import { drawBoard, markBoard } from './fretboard.js';
 
@@ -38,7 +38,7 @@ export function openPractice(song, opts = {}) {
 export function closePractice() { stopAll(); S = null; }
 
 function resetRun() {
-  S.res = S.pitched.map(() => ({ state: 'pending', attempts: 0, cents: null, frames: [] }));
+  S.res = S.pitched.map(() => ({ state: 'pending', attempts: 0, cents: null, frames: [], observed: 0 }));
   S.idx = 0; S.pos = S.pitched[0].start; S.onsets = []; S.startedAt = 0;
   S.tracker = new NoteSequenceTracker(S.pitched.map((n) => n.midi), { tolCents: settings.tolCents, stableFrames: 3, a4: settings.a4, octaveFree: settings.octaveFree || S.names }); // 只看音名：任何八度都算对
 }
@@ -130,7 +130,7 @@ function alongFrame(fr) {
     const n = S.pitched[k], ts = S.t0 + n.start * S.spb, d = n.beats * S.spb;
     const w0 = ts + Math.min(0.06, d * 0.15), w1 = ts + Math.max(0.12, d * 0.9);
     if (t < w0) break;
-    if (t <= w1) { if (fr.raw) S.res[k].frames.push(centsTo(fr.raw, n.midi)); break; }
+    if (t <= w1) { S.res[k].observed++; if (fr.raw) S.res[k].frames.push(centsTo(fr.raw, n.midi)); break; }
     // 这个音的判定窗口已过：结算
     judgeAlong(k); S.idx = k + 1;
   }
@@ -139,23 +139,21 @@ function alongFrame(fr) {
 function judgeAlong(k) {
   const r = S.res[k], n = S.pitched[k];
   if (r.state !== 'pending') return;
-  const good = r.frames.filter((c) => Math.abs(c) <= settings.tolCents);
-  const ok = r.frames.length > 0 && good.length >= Math.max(1, Math.ceil(r.frames.length * 0.3));
+  const { good, need, reason } = pitchWindowVerdict(r.frames, r.observed, settings.tolCents);
+  const ok = reason === 'hit';
   r.state = ok ? 'hit' : 'miss';
   r.cents = good.length ? good.reduce((a, b) => a + b, 0) / good.length : (r.frames.length ? median(r.frames) : null);
   if (ok) setFeedback(`✓ ${n.name}`, 'ok');
-  else if (!r.frames.length) setFeedback(`没听到 ${n.name}`, 'bad');
+  else if (reason === 'insufficient') setFeedback(`没听清 ${n.name}`, 'warn');
   else setFeedback(`✗ ${n.name} ${Math.abs(r.cents) < 100 ? (r.cents > 0 ? '偏高' : '偏低') : '音不对'}`, 'bad');
-  const need = Math.max(1, Math.ceil(r.frames.length * 0.3));
   logDiag('score', {
     mode: 'along', decision: r.state, index: k, targetMidi: n.midi, targetName: n.name,
-    string: n.string, fret: n.fret, cents: r.cents, frames: r.frames.length, good: good.length, need,
+    string: n.string, fret: n.fret, cents: r.cents, observed: r.observed, reason, audioTime: S.t0 + n.start * S.spb, frames: r.frames.length, good: good.length, need,
     tolCents: settings.tolCents, octaveFree: !!settings.octaveFree, latencyMs: settings.latencyMs,
   });
 }
 const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
 function centsTo(freq, midi) {
-  // 未勾选「高/低八度也算对」时，仍折回 1–2 个八度的同音名误判（C4 听成 C2 等）
   return snapCents(centsBetween(freq, midiToFreq(midi, settings.a4)), settings.octaveFree);
 }
 
@@ -186,15 +184,15 @@ onPitch((fr) => {
     S.idx = ev.index + 1;
     setFeedback(`✓ ${n.name}${Math.abs(ev.cents) > 12 ? `  ${fmtC(ev.cents)} 音分` : ''}`, 'ok');
     updateNow();
-    logPracticeScore(ev, n, r);
+    logPracticeScore(ev, n, r, fr.time);
     if (S.tracker.done) setTimeout(finish, 350);
   } else if (Math.abs(ev.cents) < 100) {
     setFeedback(`${ev.cents > 0 ? '偏高' : '偏低'} ${Math.abs(Math.round(ev.cents))} 音分，再来`, 'warn');
-    logPracticeScore(ev, n, r);
+    logPracticeScore(ev, n, r, fr.time);
   } else {
     const want = posText(n.string, n.fret);
     setFeedback(`弹成了 ${midiName(ev.playedMidi)} · 应该是 ${want}`, 'bad');
-    logPracticeScore(ev, n, r);
+    logPracticeScore(ev, n, r, fr.time);
   }
 });
 
@@ -367,11 +365,11 @@ function practiceSnapshot(action) {
     tolCents: settings.tolCents, octaveFree: !!(settings.octaveFree || S.names), a4: settings.a4, latencyMs: settings.latencyMs,
   };
 }
-function logPracticeScore(ev, n, r) {
+function logPracticeScore(ev, n, r, audioTime) {
   const raw = ev.freq != null ? centsBetween(ev.freq, midiToFreq(n.midi, settings.a4)) : null;
   const oct = raw != null && ev.cents != null ? Math.round((raw - ev.cents) / 1200) : 0;
   logDiag('score', {
-    mode: 'wait',
+    mode: 'wait', audioTime,
     decision: ev.type === 'hit' ? (r.attempts > 1 ? 'retry' : 'hit') : 'miss',
     index: ev.index, targetMidi: n.midi, targetName: n.name, string: n.string, fret: n.fret,
     freq: ev.freq ?? null, playedMidi: ev.playedMidi,
