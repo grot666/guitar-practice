@@ -2,6 +2,7 @@
 import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, onSettings, addHistory, css, fmtC, pct, posText } from './core.js';
 import { parseSong } from './songs.js';
 import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, matchOnsets, summarizeRhythm, noteFromFreq, snapCents } from './dsp.js';
+import { diag, logDiag } from './diag.js';
 import { drawBoard, markBoard } from './fretboard.js';
 
 let S = null;          // 当前练习
@@ -31,6 +32,7 @@ export function openPractice(song, opts = {}) {
   setFeedback(S.drill ? '看指板上的位置，弹出来' : '先点「示范」听一遍，再点「开始」', '');
   updateNow();
   if (!rafOn) { rafOn = true; requestAnimationFrame(drawLoop); }
+  logDiag('practice', practiceSnapshot('open'));
 }
 
 export function closePractice() { stopAll(); S = null; }
@@ -50,6 +52,7 @@ onSettings(syncTrackerSettings);
 
 function stopAll() {
   if (!S) return;
+  const wasRunning = S.running;
   S.running = false; S.demo = false;
   metro.stop();
   (S.demoSrc || []).forEach((s) => { try { s.stop(); } catch {} });
@@ -57,6 +60,7 @@ function stopAll() {
   clearTimeout(S.countTimer);
   $('#lane-msg').textContent = '';
   $('#p-start').textContent = '开始'; $('#p-demo').textContent = '示范';
+  if (wasRunning) logDiag('practice', practiceSnapshot('stop'));
 }
 
 // ---------- 控件 ----------
@@ -66,6 +70,7 @@ $$('#p-mode button').forEach((b) => (b.onclick = () => {
   $$('#p-mode button').forEach((x) => x.classList.toggle('on', x === b));
   setFeedback(S.mode === 'wait' ? '等我：弹对了才往下走，不用管快慢' : '跟拍：先响 1 小节预备拍，然后跟着节拍弹', '');
   updateNow();
+  logDiag('practice', practiceSnapshot('mode'));
 }));
 $('#p-tempo').oninput = (e) => { if (!S) return; S.bpm = +e.target.value; $('#p-bpm').textContent = S.bpm; };
 $('#p-start').onclick = async () => {
@@ -76,6 +81,7 @@ $('#p-start').onclick = async () => {
   if (S.tracker.done || S.res.some((r) => r.state !== 'pending')) resetRun();
   S.running = true; S.startedAt = performance.now();
   $('#p-start').textContent = '停止';
+  logDiag('practice', practiceSnapshot('start'));
   if (S.mode === 'wait') { setFeedback('开始弹吧 🎸', ''); updateNow(); }
   else startAlong();
 };
@@ -140,6 +146,12 @@ function judgeAlong(k) {
   if (ok) setFeedback(`✓ ${n.name}`, 'ok');
   else if (!r.frames.length) setFeedback(`没听到 ${n.name}`, 'bad');
   else setFeedback(`✗ ${n.name} ${Math.abs(r.cents) < 100 ? (r.cents > 0 ? '偏高' : '偏低') : '音不对'}`, 'bad');
+  const need = Math.max(1, Math.ceil(r.frames.length * 0.3));
+  logDiag('score', {
+    mode: 'along', decision: r.state, index: k, targetMidi: n.midi, targetName: n.name,
+    string: n.string, fret: n.fret, cents: r.cents, frames: r.frames.length, good: good.length, need,
+    tolCents: settings.tolCents, octaveFree: !!settings.octaveFree, latencyMs: settings.latencyMs,
+  });
 }
 const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
 function centsTo(freq, midi) {
@@ -174,12 +186,15 @@ onPitch((fr) => {
     S.idx = ev.index + 1;
     setFeedback(`✓ ${n.name}${Math.abs(ev.cents) > 12 ? `  ${fmtC(ev.cents)} 音分` : ''}`, 'ok');
     updateNow();
+    logPracticeScore(ev, n, r);
     if (S.tracker.done) setTimeout(finish, 350);
   } else if (Math.abs(ev.cents) < 100) {
     setFeedback(`${ev.cents > 0 ? '偏高' : '偏低'} ${Math.abs(Math.round(ev.cents))} 音分，再来`, 'warn');
+    logPracticeScore(ev, n, r);
   } else {
     const want = posText(n.string, n.fret);
     setFeedback(`弹成了 ${midiName(ev.playedMidi)} · 应该是 ${want}`, 'bad');
+    logPracticeScore(ev, n, r);
   }
 });
 
@@ -237,6 +252,7 @@ function finish() {
   const songTitle = S.song.title;
   addHistory({ type: S.drill ? 'drill' : 'song', id: S.song.id, title: songTitle, mode: S.mode, stars, score: Math.round(score * 100),
     pitch: Math.round((hits / total) * 100), rhythm: rhythm ? Math.round(rhythm.accuracy * 100) : null, avgCents: Math.round(avgC), bpm: S.bpm, seconds: secs });
+  logDiag('practice', { ...practiceSnapshot('finish'), stars, score: Math.round(score * 100), hits, total, avgCents: Math.round(avgC), seconds: secs, rhythm: rhythm ? { accuracy: rhythm.accuracy, meanErrorMs: rhythm.meanErrorMs, meanAbsErrorMs: rhythm.meanAbsErrorMs } : null });
   // 弹窗
   $('#r-stars').innerHTML = [0, 1, 2].map((i) => `<span class="${i < stars ? '' : 'off'}">★</span>`).join('');
   $('#r-title').textContent = stars === 3 ? '太棒了！' : stars === 2 ? '很不错！' : stars === 1 ? '完成了，继续加油' : '再试一次吧';
@@ -338,5 +354,36 @@ function drawLoop() {
 function roundRect(g, x, y, w, h, r) {
   g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
 }
+
+
+function practiceSnapshot(action) {
+  if (!S) return { action };
+  const n = S.pitched[S.idx];
+  return {
+    action, mode: S.mode, running: !!S.running, bpm: S.bpm, idx: S.idx,
+    song: S.song && (S.song.id || S.song.title),
+    drill: !!S.drill, names: !!S.names,
+    target: n ? { midi: n.midi, name: n.name, string: n.string, fret: n.fret } : null,
+    tolCents: settings.tolCents, octaveFree: !!(settings.octaveFree || S.names), a4: settings.a4, latencyMs: settings.latencyMs,
+  };
+}
+function logPracticeScore(ev, n, r) {
+  const raw = ev.freq != null ? centsBetween(ev.freq, midiToFreq(n.midi, settings.a4)) : null;
+  const oct = raw != null && ev.cents != null ? Math.round((raw - ev.cents) / 1200) : 0;
+  logDiag('score', {
+    mode: 'wait',
+    decision: ev.type === 'hit' ? (r.attempts > 1 ? 'retry' : 'hit') : 'miss',
+    index: ev.index, targetMidi: n.midi, targetName: n.name, string: n.string, fret: n.fret,
+    freq: ev.freq ?? null, playedMidi: ev.playedMidi,
+    cents: ev.cents, centsRaw: raw, octaveSnap: oct || undefined,
+    tolCents: settings.tolCents, octaveFree: !!(settings.octaveFree || S.names), a4: settings.a4,
+    attempts: r.attempts,
+  });
+}
+
+diag.setContextProvider(() => {
+  if (!S) return { view: typeof location !== 'undefined' ? (location.hash || '#home') : undefined };
+  return { view: typeof location !== 'undefined' ? (location.hash || '#home') : undefined, practice: practiceSnapshot('context') };
+});
 
 export const practiceState = () => S;

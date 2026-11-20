@@ -2,13 +2,18 @@
 import { $, $$, settings, saveSettings, onSettings, markChecked, engine, metro, live, onPitch, onOnset, onMic, enableMic, disableMic,
   switchDevice, needMic, gateDb, noiseFloorDb, applyTheme, loadHistory, clearHistory, fmtC } from './core.js';
 import { runLoopback, loopbackMessage, listenExternal, externalMessage } from './latency.js';
+import { diag, formatElapsed, defaultFilename, exportViaShareOrDownload, DIAG_NOTE_ZH } from './diag.js';
 
 let isOpen = false;
-export function openDrawer() {
+export function openDrawer(opts = {}) {
   isOpen = true;
   $('#drawer').classList.add('open'); $('#drawer').setAttribute('aria-hidden', 'false');
   document.body.classList.add('drawer-open'); $('#scrim').hidden = false;
-  sync(); refreshDevices();
+  sync(); refreshDevices(); syncLogUi();
+  if (opts.scrollTo) {
+    const el = typeof opts.scrollTo === 'string' ? $(opts.scrollTo) : opts.scrollTo;
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  }
 }
 export function closeDrawer() {
   isOpen = false;
@@ -95,6 +100,8 @@ export function initDrawer() {
   $('#s-cal-dots').innerHTML = Array.from({ length: 8 }, () => '<span></span>').join('');
   $('#s-ext').onclick = runExternalTest;
 
+  initLogUi();
+
   // 实时读数
   onPitch((fr) => {
     if (!isOpen) return;
@@ -108,6 +115,8 @@ export function initDrawer() {
   });
   const loop = () => {
     requestAnimationFrame(loop);
+    if (!isOpen && (!$('#log-chip') || $('#log-chip').hidden)) return;
+    if (diag.status().recording && (loop._logN = (loop._logN || 0) + 1) % 20 === 0) syncLogUi();
     if (!isOpen) return;
     const pos = (db) => Math.max(0, Math.min(100, ((db + 80) / 80) * 100));
     const g = gateDb();
@@ -145,3 +154,103 @@ async function runExternalTest() {
   if (r.ok) box.innerHTML = r.residualsMs.map((e) => `<span class="${Math.abs(e) < 3 ? 'hit' : Math.abs(e) < 8 ? 'warn' : 'miss'}" title="${e.toFixed(1)} ms">${e >= 0 ? '+' : ''}${e.toFixed(0)}</span>`).join('');
   st.textContent = externalMessage(r);
 }
+
+
+// ---------- 开发者诊断日志 ----------
+function logStatusText(st) {
+  if (!st.hasSession && !st.recording) return '未在记录';
+  const ev = `${st.eventCount} 条`;
+  const time = formatElapsed(st.durationMs);
+  const drop = st.dropped ? `，另有 ${st.dropped} 条因上限未写入` : '';
+  const trunc = st.truncated ? `已达上限（${st.truncateReason === 'maxDuration' ? '时长' : '条数'}）并自动停止。` : '';
+  if (st.recording) return `正在记录 · 已进行 ${time} · ${ev}${drop}。导出不会停止记录。`;
+  return `已停止 · 共 ${time} · ${ev}${drop}。${trunc}日志会保留，直到开始新的记录或点「清空日志」。`;
+}
+
+function syncLogUi() {
+  const st = diag.status();
+  const start = $('#s-log-start'), stop = $('#s-log-stop'), exp = $('#s-log-export'), clear = $('#s-log-clear');
+  const status = $('#s-log-status'), sec = $('#s-log-sec'), chip = $('#log-chip'), chipT = $('#log-chip-text');
+  if (!start) return;
+  start.disabled = st.recording;
+  start.textContent = st.hasSession && !st.recording ? '开始新的记录' : '开始记录日志';
+  stop.disabled = !st.recording;
+  exp.disabled = !st.hasSession;
+  exp.textContent = st.recording ? '导出日志（进行中）' : '导出日志';
+  clear.disabled = !st.hasSession || st.recording;
+  if (status) status.textContent = logStatusText(st);
+  if (sec) sec.classList.toggle('rec', st.recording);
+  if (chip) {
+    // 未在记录时必须隐藏，不能显示成「记录中」
+    chip.hidden = !st.recording;
+    if (st.recording && chipT) chipT.textContent = `记录中 ${formatElapsed(st.durationMs)} · ${st.eventCount}条`;
+  }
+}
+
+function initLogUi() {
+  const start = $('#s-log-start');
+  if (!start || start._bound) return;
+  start._bound = true;
+  $('#s-log-start').onclick = () => {
+    const st = diag.status();
+    if (st.recording) return;
+    if (st.hasSession && !confirm('开始新的记录会清空当前还没导出的日志，确定吗？')) return;
+    const r = diag.start({ replace: true, settings });
+    if (!r.ok) { toast(r.reason === 'already-recording' ? '已经在记录了。' : '无法开始记录。'); return; }
+    toast('开始记录诊断日志。不含原始录音，也不会上传。');
+    syncLogUi();
+  };
+  $('#s-log-stop').onclick = () => {
+    const r = diag.stop();
+    if (!r.ok) { toast('当前没有在记录。'); syncLogUi(); return; }
+    const st = diag.status();
+    toast(st.truncated ? '已达上限，记录已停止，可以导出日志。' : `已停止记录，共 ${st.eventCount} 条。可以导出，或开始新的记录。`);
+    syncLogUi();
+  };
+  $('#s-log-export').onclick = () => exportLog();
+  $('#s-log-clear').onclick = () => {
+    if (diag.status().recording) { toast('请先停止记录，再清空。'); return; }
+    if (!diag.status().hasSession) return;
+    if (!confirm('确定清空已保存的诊断日志？清空后无法再导出。')) return;
+    diag.clear();
+    toast('已清空诊断日志。');
+    syncLogUi();
+  };
+  const chip = $('#log-chip');
+  if (chip) chip.onclick = () => openDrawer({ scrollTo: '#s-log-sec' });
+  let wasRec = false;
+  diag.onChange((st) => {
+    if (wasRec && !st.recording && st.truncated) toast('日志已达上限，已自动停止。可以导出。');
+    wasRec = st.recording;
+    syncLogUi();
+  });
+  syncLogUi();
+}
+
+async function exportLog() {
+  const st = diag.status();
+  if (!st.hasSession) { toast('还没有日志可以导出。'); return; }
+  const obj = diag.exportObject();
+  const text = diag.exportText();
+  if (!obj || !text) { toast('无法生成日志文件。'); return; }
+  const name = defaultFilename(obj.session.startedAt);
+  const r = await exportViaShareOrDownload(name, text);
+  if (r.ok) {
+    toast(r.method === 'share' ? '已打开系统分享，把 JSON 发给开发者即可。' : `已导出 ${name}。${st.recording ? '记录仍在继续。' : ''}`);
+    return;
+  }
+  if (r.reason === 'cancelled') return;
+  // 下载或分享都失败：尝试复制到剪贴板，并说明原因
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast('这个浏览器不能直接下载文件，日志已复制到剪贴板。请粘贴到备忘录或发给开发者。');
+      return;
+    }
+  } catch {}
+  const why = r.reason === 'no-blob' || r.reason === 'no-object-url' ? '当前浏览器不支持生成下载文件。'
+    : r.reason === 'no-document' ? '当前环境无法保存文件。'
+    : '导出失败。';
+  toast(why + '请换用 Safari / Chrome，或截图把设置和「听到」的音名发给开发者。');
+}
+

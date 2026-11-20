@@ -418,3 +418,10 @@ input[type=range]:disabled { opacity: .45; }
   .bt-patterns { grid-template-columns: 1fr 1fr; }
   .bt-big b { font-size: 2.2rem; }
 }
+
+/* 开发者日志记录指示（仅在正在记录时显示） */
+.log-chip { height: 42px; display: flex; align-items: center; gap: .45rem; padding: 0 .85rem; border-radius: 21px; border: 0; background: var(--card); cursor: pointer; font-size: .82rem; color: var(--fg); white-space: nowrap; }
+.log-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 4px rgba(248,113,113,.2); animation: recblink 1.2s ease-in-out infinite; }
+@keyframes recblink { 50% { opacity: .35; } }
+#s-log-status b { color: var(--fg); }
+#s-log-sec.rec h3::after { content: ' · 记录中'; color: var(--bad); font-weight: 600; font-size: .8rem; }
