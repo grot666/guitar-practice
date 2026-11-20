@@ -425,3 +425,11 @@ input[type=range]:disabled { opacity: .45; }
 @keyframes recblink { 50% { opacity: .35; } }
 #s-log-status b { color: var(--fg); }
 #s-log-sec.rec h3::after { content: ' · 记录中'; color: var(--bad); font-weight: 600; font-size: .8rem; }
+
+#p-phrase { flex-wrap: wrap; margin-bottom: .6rem; }
+#p-phrase select { font: inherit; max-width: 100%; }
+#v-play[data-guide="tab"] .now, #v-play[data-guide="memory"] .now,
+#v-play[data-guide="memory"] #p-heard { display: none; }
+#v-play[data-guide="memory"] #lane { visibility: hidden; }
+#v-play[data-guide="memory"] .lane-wrap { height: 4rem; }
+#r-phrase { flex-wrap: wrap; }

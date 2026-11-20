@@ -1,7 +1,8 @@
+import { annotate, phrases, sliceRange, barLabel, rangeLabel, reviewPhrase, difficulty } from './phrase.js';
 // practice.js — 练曲子 / 认识指板 的练习界面：滚动六线谱、指板提示、音高判定、「等我」和「跟拍」两种模式
-import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, onSettings, addHistory, css, fmtC, pct, posText } from './core.js';
+import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, onMic, onSettings, addHistory, loadHistory, saveResume, css, fmtC, pct, posText } from './core.js';
 import { parseSong } from './songs.js';
-import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, matchOnsets, summarizeRhythm, noteFromFreq, pitchWindowVerdict, snapCents } from './dsp.js';
+import { NoteSequenceTracker, centsBetween, midiToFreq, midiName, summarizeRhythm, noteFromFreq, snapCents } from './dsp.js';
 import { diag, logDiag } from './diag.js';
 import { drawBoard, markBoard } from './fretboard.js';
 
@@ -11,14 +12,28 @@ let onsetPending = false;
 
 export function openPractice(song, opts = {}) {
   stopAll();
-  const notes = parseSong(song);
+  const notes = annotate(parseSong(song), song.beats, song.pickup || 0);
   const pitched = notes.map((n, i) => ({ ...n, i })).filter((n) => n.midi !== null);
   S = {
-    song, notes, pitched, drill: !!opts.drill, names: !!opts.names, onDone: opts.onDone,
+    song, notes, pitched, fullNotes: notes, ranges: phrases(notes, song.pickup), range: null, parent: null, focusBar: null, guide: 'full', drill: !!opts.drill, names: !!opts.names, onDone: opts.onDone,
     mode: opts.drill ? 'wait' : (S && S.lastMode) || 'wait', bpm: song.bpm,
     running: false, demo: false, res: [], pos: pitched[0].start, idx: 0,
   };
-  resetRun();
+  const saved = opts.resume;
+  if (!S.drill && saved?.id === song.id) {
+    S.mode = saved.mode === 'along' ? 'along' : 'wait';
+    S.bpm = Math.max(40, Math.min(160, Number(saved.bpm) || song.bpm));
+    S.guide = ['tab','memory'].includes(saved.guide) ? saved.guide : 'full';
+    S.hard = saved.hard && validRange([saved.hard.bar, saved.hard.bar]) ? saved.hard : null;
+    S.range = validRange(saved.range); S.parent = validRange(saved.parent);
+    S.focusBar = Number.isInteger(saved.focusBar) ? saved.focusBar : null;
+  }
+  $('#p-phrase').hidden = S.drill;
+  $('#p-loop').checked = false;
+  $('#p-guide').value = S.guide;
+  $('#v-play').dataset.guide = S.guide;
+  $('#p-range').innerHTML = '<option value="">整首</option>' + S.ranges.map((r,i) => `<option value="${i}">${rangeLabel(r)}</option>`).join('');
+  applyRange();
   $('#p-title').textContent = song.title;
   const strs = [...new Set(pitched.map((n) => n.string))].sort();
   $('#p-meta').textContent = S.drill ? `${pitched.length} 个音 · ${strs.map((s) => s + '弦').join(' ')}` : `${song.en} · ${song.beats}/4 · ${pitched.length} 个音 · 用到 ${strs.join('、')} 弦`;
@@ -37,9 +52,52 @@ export function openPractice(song, opts = {}) {
 
 export function closePractice() { stopAll(); S = null; }
 
+function validRange(r) {
+  if (!Array.isArray(r) || r.length !== 2 || !r.every(Number.isInteger)) return null;
+  return r[0] >= S.fullNotes[0].bar && r[1] <= S.fullNotes.at(-1).bar && r[0] <= r[1] &&
+    S.fullNotes.some(n => n.midi !== null && n.bar >= r[0] && n.bar <= r[1]) ? r : null;
+}
+function applyRange() {
+  S.notes = sliceRange(S.fullNotes, S.range, S.song.beats, S.song.pickup || 0);
+  S.pitched = S.notes.filter(n => n.midi !== null);
+  S.pickup = !S.range || S.range[0] === 0 ? S.song.pickup || 0 : 0;
+  const selected = S.ranges.findIndex(r => String(r) === String(S.parent || S.range));
+  $('#p-range').value = selected < 0 ? '' : String(selected);
+  $('#p-loop').disabled = !S.range;
+  $('#p-scope').textContent = rangeLabel(S.range);
+  $('#p-return').hidden = !S.parent;
+  $('#p-previous-hard').hidden = !S.hard || S.focusBar !== null;
+  if (S.hard) $('#p-previous-hard').textContent = '重练' + barLabel(S.hard.bar);
+  resetRun();
+}
+function remember() {
+  if (!S || S.drill) return;
+  const { range, parent, focusBar, bpm, guide, mode } = S;
+  saveResume({ id: S.song.id, range, parent, focusBar, bpm, guide, mode, hard: S.hard ?? null, label: rangeLabel(range) });
+}
+function changeRange(range, start = false) {
+  stopAll(); S.range = validRange(range); applyRange(); updateNow(); remember();
+  $('#result').hidden = true;
+  setFeedback(rangeLabel(S.range) + ' · 准备好就点开始', '');
+  if (start) $('#p-start').click();
+}
+$('#p-range').onchange = e => {
+  S.parent = null; S.focusBar = null; S.hard = null;
+  changeRange(e.target.value === '' ? null : S.ranges[Number(e.target.value)]);
+};
+$('#p-guide').onchange = e => { S.guide = e.target.value; $('#v-play').dataset.guide = S.guide; remember(); };
+$('#p-previous-hard').onclick = $('#r-focus').onclick = () => {
+  const bar = S.hard.bar;
+  S.parent = S.parent || S.ranges.find(r => r[0] <= bar && r[1] >= bar);
+  S.focusBar = bar; changeRange([bar, bar], true);
+};
+$('#r-lead').onclick = () => changeRange([Math.max(S.fullNotes[0].bar, S.focusBar - 1), S.focusBar], true);
+$('#p-return').onclick = $('#r-parent').onclick = () => {
+  const range = S.parent; S.parent = null; S.focusBar = null; changeRange(range, true);
+};
 function resetRun() {
-  S.res = S.pitched.map(() => ({ state: 'pending', attempts: 0, cents: null, frames: [], observed: 0 }));
-  S.idx = 0; S.pos = S.pitched[0].start; S.onsets = []; S.startedAt = 0;
+  S.res = S.pitched.map(() => ({ state: 'pending', attempts: 0, cents: null }));
+  onsetPending = false; S.shown = -1; S.samples = []; S.idx = 0; S.pos = S.pitched[0].start; S.onsets = []; S.startedAt = 0;
   S.tracker = new NoteSequenceTracker(S.pitched.map((n) => n.midi), { tolCents: settings.tolCents, stableFrames: 3, a4: settings.a4, octaveFree: settings.octaveFree || S.names }); // 只看音名：任何八度都算对
 }
 function syncTrackerSettings() {
@@ -49,15 +107,23 @@ function syncTrackerSettings() {
   S.tracker.octaveFree = settings.octaveFree || S.names;
 }
 onSettings(syncTrackerSettings);
+onMic(state => {
+  if (state === 'off' && S?.running) {
+    stopAll();
+    setFeedback('麦克风已关闭，本轮已暂停。点开始重新练。', 'warn');
+  }
+});
 
 function stopAll() {
   if (!S) return;
   const wasRunning = S.running;
+  $('#p-guide').disabled = false; $('#p-tempo').disabled = false;
   S.running = false; S.demo = false;
   metro.stop();
   (S.demoSrc || []).forEach((s) => { try { s.stop(); } catch {} });
   S.demoSrc = [];
-  clearTimeout(S.countTimer);
+  clearTimeout(S.countTimer); clearTimeout(S.finishTimer);
+  S.request = null;
   $('#lane-msg').textContent = '';
   $('#p-start').textContent = '开始'; $('#p-demo').textContent = '示范';
   if (wasRunning) logDiag('practice', practiceSnapshot('stop'));
@@ -66,19 +132,23 @@ function stopAll() {
 // ---------- 控件 ----------
 $$('#p-mode button').forEach((b) => (b.onclick = () => {
   if (!S) return;
-  stopAll(); S.mode = S.lastMode = b.dataset.v; resetRun();
+  stopAll(); S.mode = S.lastMode = b.dataset.v; resetRun(); remember();
   $$('#p-mode button').forEach((x) => x.classList.toggle('on', x === b));
   setFeedback(S.mode === 'wait' ? '等我：弹对了才往下走，不用管快慢' : '跟拍：先响 1 小节预备拍，然后跟着节拍弹', '');
   updateNow();
   logDiag('practice', practiceSnapshot('mode'));
 }));
-$('#p-tempo').oninput = (e) => { if (!S) return; S.bpm = +e.target.value; $('#p-bpm').textContent = S.bpm; };
+$('#p-tempo').oninput = (e) => { if (!S) return; S.bpm = +e.target.value; $('#p-bpm').textContent = S.bpm; remember(); };
 $('#p-start').onclick = async () => {
   if (!S) return;
   if (S.running || S.demo) { stopAll(); setFeedback('已暂停', ''); return; }
+  const session = S, request = Symbol(); S.request = request;
   if (!(await needMic())) return;
   await engine.unlock();
+  if (S !== session || S.request !== request) return;
+  remember();
   if (S.tracker.done || S.res.some((r) => r.state !== 'pending')) resetRun();
+  $('#p-guide').disabled = true; $('#p-tempo').disabled = true;
   S.running = true; S.startedAt = performance.now();
   $('#p-start').textContent = '停止';
   logDiag('practice', practiceSnapshot('start'));
@@ -91,7 +161,9 @@ $('#p-demo').onclick = async () => {
   if (S.demo) { stopAll(); return; }
   stopAll(); resetRun();
   releaseMicForPlayback('（示范时只播放；点「开始」会重新打开）');
+  const session = S, request = Symbol(); S.request = request;
   await engine.unlock();
+  if (S !== session || S.request !== request) return;
   const spb = 60 / S.bpm, t0 = engine.ctx.currentTime + 0.4;
   S.demo = true; S.t0 = t0; S.spb = spb; S.demoSrc = [];
   for (const n of S.pitched) S.demoSrc.push(engine.pluck(n.midi, t0 + n.start * spb, n.beats * spb * 0.95, 0.85));
@@ -107,7 +179,7 @@ function startAlong() {
   const spb = 60 / S.bpm, beats = S.song.beats;
   metro.set({ bpm: S.bpm, beatsPerBar: beats, subdiv: 1 });
   metro.sound = settings.outMode !== 'silent'; metro.accent = true; metro.volume = settings.volume;
-  const offset = S.song.pickup ? beats - S.song.pickup : 0;
+  const offset = S.pickup ? beats - S.pickup : 0;
   const last = S.pitched[S.pitched.length - 1];
   const totalTicks = beats + offset + Math.ceil(last.start + last.beats);
   metro.onTick = (time, info) => {
@@ -126,33 +198,10 @@ function startAlong() {
 
 function alongFrame(fr) {
   const lat = settings.latencyMs / 1000, t = fr.time - lat;
-  for (let k = S.idx; k < S.pitched.length; k++) {
-    const n = S.pitched[k], ts = S.t0 + n.start * S.spb, d = n.beats * S.spb;
-    const w0 = ts + Math.min(0.06, d * 0.15), w1 = ts + Math.max(0.12, d * 0.9);
-    if (t < w0) break;
-    if (t <= w1) { S.res[k].observed++; if (fr.raw) S.res[k].frames.push(centsTo(fr.raw, n.midi)); break; }
-    // 这个音的判定窗口已过：结算
-    judgeAlong(k); S.idx = k + 1;
-  }
+  if (t >= S.t0 - 0.2 && t <= S.lastEnd + 0.2) S.samples.push({ time: fr.time, raw: fr.raw, status: fr.status });
+  while (S.idx < S.pitched.length && t >= S.t0 + (S.pitched[S.idx].start + S.pitched[S.idx].beats) * S.spb) S.idx++;
   if (t > S.lastEnd + 0.35) finish();
 }
-function judgeAlong(k) {
-  const r = S.res[k], n = S.pitched[k];
-  if (r.state !== 'pending') return;
-  const { good, need, reason } = pitchWindowVerdict(r.frames, r.observed, settings.tolCents);
-  const ok = reason === 'hit';
-  r.state = ok ? 'hit' : 'miss';
-  r.cents = good.length ? good.reduce((a, b) => a + b, 0) / good.length : (r.frames.length ? median(r.frames) : null);
-  if (ok) setFeedback(`✓ ${n.name}`, 'ok');
-  else if (reason === 'insufficient') setFeedback(`没听清 ${n.name}`, 'warn');
-  else setFeedback(`✗ ${n.name} ${Math.abs(r.cents) < 100 ? (r.cents > 0 ? '偏高' : '偏低') : '音不对'}`, 'bad');
-  logDiag('score', {
-    mode: 'along', decision: r.state, index: k, targetMidi: n.midi, targetName: n.name,
-    string: n.string, fret: n.fret, cents: r.cents, observed: r.observed, reason, audioTime: S.t0 + n.start * S.spb, frames: r.frames.length, good: good.length, need,
-    tolCents: settings.tolCents, octaveFree: !!settings.octaveFree, latencyMs: settings.latencyMs,
-  });
-}
-const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
 function centsTo(freq, midi) {
   return snapCents(centsBetween(freq, midiToFreq(midi, settings.a4)), settings.octaveFree);
 }
@@ -185,7 +234,7 @@ onPitch((fr) => {
     setFeedback(`✓ ${n.name}${Math.abs(ev.cents) > 12 ? `  ${fmtC(ev.cents)} 音分` : ''}`, 'ok');
     updateNow();
     logPracticeScore(ev, n, r, fr.time);
-    if (S.tracker.done) setTimeout(finish, 350);
+    if (S.tracker.done) S.finishTimer = setTimeout(finish, 350);
   } else if (Math.abs(ev.cents) < 100) {
     setFeedback(`${ev.cents > 0 ? '偏高' : '偏低'} ${Math.abs(Math.round(ev.cents))} 音分，再来`, 'warn');
     logPracticeScore(ev, n, r, fr.time);
@@ -213,24 +262,35 @@ function updateNow() {
 function finish() {
   if (!S || !S.running) return;
   const along = S.mode === 'along';
-  if (along) for (let k = S.idx; k < S.pitched.length; k++) judgeAlong(k);
+  let review = null;
+  if (along) {
+    review = reviewPhrase(S.pitched, S.samples, S.onsets.filter(t => t >= S.t0 - 0.3 + settings.latencyMs / 1000 && t <= S.lastEnd + 0.3 + settings.latencyMs / 1000), { ...settings, t0: S.t0, spb: S.spb });
+    review.rows.forEach((row,i) => {
+      S.res[i].state = row.outcome; S.res[i].cents = row.cents;
+      logDiag('score', { mode: 'along', index: i, targetMidi: S.pitched[i].midi, audioTime: S.t0 + S.pitched[i].start * S.spb,
+        decision: row.outcome, frames: row.voiced, tolCents: settings.tolCents, octaveFree: settings.octaveFree, ...row });
+    });
+  }
+  const rows = review?.rows || S.pitched.map((n,i) => ({ bar: n.bar, note: n.name, previous: S.pitched[i-1]?.name || null, outcome: S.res[i].state, errorMs: null }));
+  S.hard = difficulty(rows);
+  remember();
+  $('#p-previous-hard').hidden = !S.hard || S.focusBar !== null;
+  if (S.hard) $('#p-previous-hard').textContent = '重练' + barLabel(S.hard.bar);
+  $('#p-guide').disabled = false; $('#p-tempo').disabled = false;
   S.running = false; metro.stop();
   $('#p-start').textContent = '开始';
   const total = S.pitched.length;
   const hits = S.res.filter((r) => r.state === 'hit' || r.state === 'retry').length;
   const first = S.res.filter((r) => r.state === 'hit').length;
-  const centsArr = S.res.filter((r) => r.cents !== null && r.state !== 'miss').map((r) => Math.abs(r.cents));
+  const centsArr = S.res.filter((r) => r.cents !== null && (r.state === 'hit' || r.state === 'retry')).map((r) => Math.abs(r.cents));
   const avgC = centsArr.length ? centsArr.reduce((a, b) => a + b, 0) / centsArr.length : 0;
   let score, stats, rhythm = null;
   const secs = Math.round((performance.now() - S.startedAt) / 1000);
   if (along) {
-    const starts = S.pitched.map((n) => S.t0 + n.start * S.spb);
-    let minGap = Infinity; for (let i = 1; i < starts.length; i++) minGap = Math.min(minGap, starts[i] - starts[i - 1]);
-    const m = matchOnsets(S.onsets.filter((o) => o > S.t0 - 0.3 && o < S.lastEnd + 0.3), starts, { latencyMs: settings.latencyMs, windowMs: Math.min(150, (minGap * 1000) / 2) });
-    rhythm = summarizeRhythm(m);
-    const pitchAcc = hits / total;
-    score = 0.6 * pitchAcc + 0.4 * rhythm.accuracy;
-    stats = [[pct(pitchAcc), '音准'], [pct(rhythm.accuracy), '节奏'], [Math.round(rhythm.meanAbsErrorMs) + 'ms', '平均早/晚']];
+    rhythm = summarizeRhythm(review.match);
+    score = review.pitch === null ? null : 0.6 * review.pitch + 0.4 * rhythm.accuracy;
+    stats = [[review.pitch === null ? '未评' : pct(review.pitch), '音准'], [pct(rhythm.accuracy), '节奏'],
+      [review.wrong, '音高不符'], [review.missing, '未检出拨弦'], [review.unclear, '没听清'], [review.rows.filter(r => r.recovered).length, '音高确认 · 起音未确认']];
   } else {
     const attempts = S.res.reduce((a, r) => a + r.attempts, 0);
     const acc = attempts ? hits / attempts : 0;
@@ -241,16 +301,19 @@ function finish() {
   // 难点
   const tr = new Map();
   S.res.forEach((r, k) => {
-    const bad = along ? (r.state === 'miss' ? 1 : 0) : Math.max(0, r.attempts - 1);
+    const bad = along ? (r.state === 'wrong' || r.state === 'missing' ? 1 : 0) : Math.max(0, r.attempts - 1);
     if (!bad) return;
     const n = S.pitched[k], key = `${n.string}-${n.fret}`;
     const e = tr.get(key) || { n, c: 0 }; e.c += bad; tr.set(key, e);
   });
   const trouble = [...tr.values()].sort((a, b) => b.c - a.c).slice(0, 3);
   const songTitle = S.song.title;
-  addHistory({ type: S.drill ? 'drill' : 'song', id: S.song.id, title: songTitle, mode: S.mode, stars, score: Math.round(score * 100),
-    pitch: Math.round((hits / total) * 100), rhythm: rhythm ? Math.round(rhythm.accuracy * 100) : null, avgCents: Math.round(avgC), bpm: S.bpm, seconds: secs });
-  logDiag('practice', { ...practiceSnapshot('finish'), stars, score: Math.round(score * 100), hits, total, avgCents: Math.round(avgC), seconds: secs, rhythm: rhythm ? { accuracy: rhythm.accuracy, meanErrorMs: rhythm.meanErrorMs, meanAbsErrorMs: rhythm.meanAbsErrorMs } : null });
+  const scopeLabel = rangeLabel(S.range), guideLabel = $('#p-guide').selectedOptions[0].textContent;
+  const prior = loadHistory().reverse().find(e => e.id === S.song.id && e.scopeLabel === scopeLabel && e.guideLabel === guideLabel && e.bpm === S.bpm && e.mode === S.mode && e.score != null);
+  addHistory({ scopeLabel, guideLabel, range: S.range, transition: S.hard, unclear: review?.unclear, wrong: review?.wrong, missing: review?.missing,
+    type: S.drill ? 'drill' : 'song', id: S.song.id, title: songTitle, mode: S.mode, stars, score: score === null ? null : Math.round(score * 100),
+    pitch: along ? (review.pitch === null ? null : Math.round(review.pitch * 100)) : Math.round(hits / total * 100), rhythm: rhythm ? Math.round(rhythm.accuracy * 100) : null, avgCents: centsArr.length ? Math.round(avgC) : null, bpm: S.bpm, seconds: secs });
+  logDiag('practice', { ...practiceSnapshot('finish'), stars, score: score === null ? null : Math.round(score * 100), hits, total, avgCents: centsArr.length ? Math.round(avgC) : null, seconds: secs, rhythm: rhythm ? { accuracy: rhythm.accuracy, meanErrorMs: rhythm.meanErrorMs, meanAbsErrorMs: rhythm.meanAbsErrorMs } : null });
   // 弹窗
   $('#r-stars').innerHTML = [0, 1, 2].map((i) => `<span class="${i < stars ? '' : 'off'}">★</span>`).join('');
   $('#r-title').textContent = stars === 3 ? '太棒了！' : stars === 2 ? '很不错！' : stars === 1 ? '完成了，继续加油' : '再试一次吧';
@@ -260,6 +323,22 @@ function finish() {
     (along && rhythm && Math.abs(rhythm.meanErrorMs) > 25 ? `<div class="trouble">整体${rhythm.meanErrorMs > 0 ? '偏晚（拖拍）' : '偏早（抢拍）'} ${Math.abs(Math.round(rhythm.meanErrorMs))} ms${settings.latencyMs === 0 ? '，还没校准延迟，去设置里校准一下' : ''}</div>` : '') +
     (!along && stars >= 2 && !S.drill ? `<div class="trouble">下一步：试试「跟拍」模式，或者把速度调快一点。</div>` : '') +
     (avgC > 15 ? `<div class="trouble">平均偏差 ${Math.round(avgC)} 音分：先去「调音」把琴调准，按弦时手指靠近品丝。</div>` : '');
+  if (score === null) { $('#r-title').textContent = '音高证据不足'; $('#r-stars').textContent = ''; }
+  const hard = S.hard;
+  const comparison = prior && score !== null ? ` 同范围同速度，上次 ${prior.score} 分，本次 ${Math.round(score * 100)} 分。` : '';
+  const reason = hard && (hard.outcome === 'wrong' ? '音高不符' : hard.outcome === 'missing' ? '未检出拨弦' :
+    hard.outcome === 'retry' ? '重复尝试' : `${hard.errorMs > 0 ? '晚' : '早'} ${Math.abs(hard.errorMs)} ms`);
+  $('#r-review').textContent = (hard ? `${barLabel(hard.bar)} · ${hard.previous ? hard.previous + ' → ' : ''}${hard.note}：${reason}。` : '') + comparison;
+  $('#r-phrase').hidden = S.drill;
+  $('#r-focus').hidden = !hard || S.focusBar !== null;
+  if (hard) $('#r-focus').textContent = '重练' + barLabel(hard.bar);
+  $('#r-lead').hidden = S.focusBar === null || S.focusBar <= S.fullNotes[0].bar;
+  $('#r-parent').hidden = !S.parent;
+  S.samples = [];
+  if (S.range && $('#p-loop').checked && !S.drill) {
+    setFeedback(rangeLabel(S.range) + ' · 开始下一遍', '');
+    resetRun(); updateNow(); $('#p-start').click(); return;
+  }
   $('#result').hidden = false;
   setFeedback(`完成 ${'★'.repeat(stars)}`, 'ok');
   updateNow();
@@ -302,7 +381,7 @@ function drawLoop() {
   const top = 22, bottom = H - 18, gap = (bottom - top) / 5, y = (s) => top + (s - 1) * gap;
   // 拍线与小节线
   const b0 = Math.floor(S.pos - hitX / ppb) - 1, b1 = Math.ceil(S.pos + (W - hitX) / ppb) + 1;
-  const pk = S.song.pickup || 0, beats = S.song.beats;
+  const pk = S.pickup || 0, beats = S.song.beats;
   for (let b = b0; b <= b1; b++) {
     const x = hitX + (b - S.pos) * ppb;
     const bar = ((b - pk) % beats + beats) % beats === 0;
@@ -359,7 +438,7 @@ function practiceSnapshot(action) {
   const n = S.pitched[S.idx];
   return {
     action, mode: S.mode, running: !!S.running, bpm: S.bpm, idx: S.idx,
-    song: S.song && (S.song.id || S.song.title),
+    song: S.song && (S.song.id || S.song.title), range: S.range, guide: S.guide,
     drill: !!S.drill, names: !!S.names,
     target: n ? { midi: n.midi, name: n.name, string: n.string, fret: n.fret } : null,
     tolCents: settings.tolCents, octaveFree: !!(settings.octaveFree || S.names), a4: settings.a4, latencyMs: settings.latencyMs,

@@ -4,7 +4,7 @@
 export const DIAG_SCHEMA = 1;
 export const DIAG_SCHEMA_NAME = 'guitar-practice-diag';
 export const DIAG_APP = 'guitar-practice';
-export const DIAG_BUILD = '2026-11-20-pitch-2';
+export const DIAG_BUILD = '2026-11-20-phrase-1';
 
 export const DEFAULT_LIMITS = {
   maxEvents: 4000,

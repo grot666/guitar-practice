@@ -4,6 +4,9 @@ import { logDiag } from './diag.js';
 import { METERS, patternsFor, getPattern, gridCells, RhythmSession, TempoLadder, clickOn, ExternalClickTracker } from './rhythm.js';
 import { runLoopback, loopbackMessage, listenExternal, externalMessage, testBusy } from './latency.js';
 
+import { drawBoard, markShape } from './fretboard.js';
+import { CHORDS } from './harmony.js';
+
 const LS = 'guitar-practice:beat';
 const json = (s) => { try { return JSON.parse(s); } catch { return null; } };
 const cfg = Object.assign({
@@ -45,7 +48,15 @@ function notationHTML(pattern, meter, { focus = null, mini = false } = {}) {
 function renderHeader() {
   const p = curPattern(), m = meterObj(), focus = run && run.focus;
   $('#bt-pat-name').textContent = p.name;
-  $('#bt-pat-hint').textContent = p.hint;
+  $('#bt-pat-hint').textContent = p.hint + (p.chords ? ' 按法（六弦到一弦）：' + p.chords.map(c => c + ' ' + CHORDS[c].shape).join(' / ') : '');
+  $('#bt-chords').hidden = !p.chords;
+  if (p.chords) {
+    p.chords.forEach((name,i) => {
+      const board = $('#bt-shape-' + i);
+      drawBoard(board); markShape(board, CHORDS[name].shape);
+      board.parentElement.querySelector('b').textContent = name;
+    });
+  }
   $('#bt-meter-pill').textContent = m.id + (m.compound ? '（BPM = 附点四分）' : '');
   $('#bt-src-pill').textContent = cfg.src === 'external' ? '外部节拍器' : '内置节拍器';
   $('#bt-focus-pill').hidden = !focus;
@@ -238,7 +249,8 @@ function tickRun() {
     else if (tp < first) st.textContent = `预备 ${Math.max(1, meter.beats - Math.floor((tp - run.countStart) / bs))}`;
     else {
       const cur = session.bars.filter((b) => b.start <= tp).pop();
-      if (cur) { st.textContent = cur.muted ? '🔇 心里数拍子' : '弹！'; $('#bt-barno').textContent = `第 ${cur.index + 1} / ${run.bars} 小节 · ${cur.bpm} BPM`; }
+      if (cur) { const pair = run.pattern.chords;
+        st.textContent = pair ? pair[cur.index % 2] + ' · 下一小节 ' + pair[(cur.index + 1) % 2] : cur.muted ? '🔇 心里数拍子' : '弹！'; $('#bt-barno').textContent = `第 ${cur.index + 1} / ${run.bars} 小节 · ${cur.bpm} BPM`; }
     }
   }
   if (session.results.length >= run.bars) finish(false);
@@ -388,6 +400,14 @@ function renderDiag(d, r, endBpm) {
     </div>
     <h3>每个位置：平均早晚（竖线 = 忽早忽晚的范围）</h3>
     ${posChart(d, r)}
+    ${r.pattern.chords ? r.pattern.chords.map((name,i) => {
+      const changes = r.session.results.filter(b => b.index > 0 && b.index % 2 === i);
+      if (!changes.length) return '';
+      const times = changes.map(b => b.notes[0].errMs).filter(t => t !== null);
+      const err = times.length ? Math.round(times.reduce((sum,t) => sum + t, 0) / times.length) : null;
+      const bias = err === null ? '' : err === 0 ? ' · 平均正好' : ' · 平均' + (err > 0 ? '晚 ' : '早 ') + Math.abs(err) + ' ms';
+      return `<p>${r.pattern.chords[1-i]} → ${name}：首拍弹到 ${times.length}/${changes.length}${bias}</p>`;
+    }).join('') : ''}
     ${focusCmp}
     <ul class="bt-tips">${d.tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
     <div class="row wrap">
