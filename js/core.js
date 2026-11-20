@@ -27,7 +27,10 @@ export function addHistory(e) {
   while (hst.length > 300) hst.shift();
   localStorage.setItem(LS_HIST, JSON.stringify(hst));
 }
-export function clearHistory() { localStorage.removeItem(LS_HIST); }
+const RESUME = 'guitar-practice:resume';
+export function loadResume() { return json(localStorage.getItem(RESUME)); }
+export function saveResume(state) { localStorage.setItem(RESUME, JSON.stringify(state)); }
+export function clearHistory() { localStorage.removeItem(LS_HIST); localStorage.removeItem(RESUME); }
 
 // ---------- 音频 ----------
 export const engine = new AudioEngine();

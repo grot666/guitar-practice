@@ -33,6 +33,7 @@
       <h1>今天练点什么？</h1>
       <p class="muted">入门阶段：先把琴调准，认识第一把位，再弹几首小曲子。</p>
     </div>
+    <a id="resume-song" class="item" hidden></a>
     <button id="first-run" class="banner" hidden>
       <span class="banner-ic">✨</span>
       <span><b>第一次用？先花 1 分钟检查</b><small>麦克风能不能听到琴、节拍器响不响、延迟多少——都在一个面板里</small></span>
@@ -112,6 +113,14 @@
         <button data-v="along" title="跟着节拍器按节奏弹，评音准和节奏">跟拍</button>
       </div>
     </div>
+    <div class="controls" id="p-phrase">
+      <label>练习范围 <select id="p-range"></select></label>
+      <label>提示 <select id="p-guide"><option value="full">谱和指法</option><option value="tab">只看谱</option><option value="memory">背谱</option></select></label>
+      <label><input id="p-loop" type="checkbox"> 连续循环</label>
+      <span id="p-scope" class="muted small"></span>
+      <button id="p-previous-hard" class="btn" hidden>练上次难点</button>
+      <button id="p-return" class="btn" hidden>接回整句</button>
+    </div>
     <div class="lane-wrap"><canvas id="lane"></canvas><div id="lane-msg" class="lane-msg"></div></div>
     <div class="now">
       <button id="p-now" class="now-card" title="点一下听这个音">
@@ -172,6 +181,10 @@
     <div id="bt-notation" class="bt-notation" aria-label="节奏型"></div>
 
     <div class="card bt-live">
+      <div id="bt-chords" class="row" hidden>
+        <div><b>Em</b><svg id="bt-shape-0" class="fretboard"></svg></div>
+        <div><b>G</b><svg id="bt-shape-1" class="fretboard"></svg></div>
+      </div>
       <div class="bt-status"><span id="bt-state">准备好就点「开始」</span><span id="bt-barno" class="muted small"></span></div>
       <div id="bt-beats" class="dots bt-beats"></div>
       <div class="bt-big"><b id="bt-last">—</b><span id="bt-last-l" class="muted small"></span></div>
@@ -285,6 +298,12 @@
     <h2 id="r-title">完成！</h2>
     <div id="r-stats" class="stats"></div>
     <div id="r-trouble"></div>
+    <p id="r-review"></p>
+    <div class="controls" id="r-phrase">
+      <button class="btn" id="r-focus">练难点</button>
+      <button class="btn" id="r-lead">带上一小节</button>
+      <button class="btn" id="r-parent">接回整句</button>
+    </div>
     <div class="row">
       <button id="r-again" class="btn primary">再来一次</button>
       <button id="r-close" class="btn">返回</button>
