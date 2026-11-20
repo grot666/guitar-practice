@@ -4,7 +4,7 @@
 export const DIAG_SCHEMA = 1;
 export const DIAG_SCHEMA_NAME = 'guitar-practice-diag';
 export const DIAG_APP = 'guitar-practice';
-export const DIAG_BUILD = '2026-11-20-diag-1';
+export const DIAG_BUILD = '2026-11-20-phrase-1';
 
 export const DEFAULT_LIMITS = {
   maxEvents: 4000,
@@ -242,7 +242,7 @@ export function createLogger(opts = {}) {
     const sm = numOrNull(frame.freq ?? frame.sm);
     const drop = !(hz > 0);
     const midi = Number.isFinite(frame.midi) ? frame.midi : extra.midi;
-    const key = drop ? 'drop' : String(midi ?? Math.round(hz || 0));
+    const key = drop ? (frame.status || 'drop') : String(midi ?? Math.round(hz || 0));
     const t = now();
     const changed = key !== lastPitchKey;
     const due = (t - lastPitchAt) >= limits.pitchIntervalMs;
@@ -252,6 +252,7 @@ export function createLogger(opts = {}) {
     const ctx = contextProvider ? contextProvider() : null;
     const practice = extra.practice || (ctx && ctx.practice) || undefined;
     return log('pitch', compact({
+      status: frame.status, audioTime: frame.audioTime, gate: frame.gate,
       hz: hz == null ? null : round(hz, 2),
       sm: sm == null ? null : round(sm, 2),
       midi: Number.isFinite(midi) ? midi : undefined,

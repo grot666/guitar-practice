@@ -1,6 +1,6 @@
 // app.js — 路由与各页面（首页 / 调音 / 曲库 / 认识指板 / 节奏 / 记录）
 import { $, $$, esc, settings, saveSettings, engine, metro, live, onPitch, onOnset, onMic, enableMic, disableMic, needMic,
-  loadHistory, addHistory, applyTheme, css, fmtC, pct, markChecked, toast } from './core.js';
+  loadHistory, loadResume, addHistory, applyTheme, css, fmtC, pct, markChecked, toast } from './core.js';
 import { SONGS, parseSong, makeFretDrill, OPEN_MIDI } from './songs.js';
 import { midiToFreq, midiName, noteFromFreq, centsBetween, matchOnsets, summarizeRhythm, gradeOf } from './dsp.js';
 import { drawBoard } from './fretboard.js';
@@ -57,7 +57,7 @@ function route() {
     else {
       const song = SONGS.find((s) => s.id === arg);
       if (!song) { location.hash = '#songs'; return; }
-      openPractice(song);
+      openPractice(song, { resume: location.hash.endsWith('/resume') ? loadResume() : null });
     }
   }
   window.scrollTo(0, 0);
@@ -70,6 +70,10 @@ $('#back').onclick = () => {
 
 // ---------- 首页 ----------
 function renderHome() {
+  const resume = loadResume(), song = SONGS.find(s => s.id === resume?.id);
+  const link = $('#resume-song');
+  link.hidden = !song;
+  if (song) { link.href = '#play/' + song.id + '/resume'; link.textContent = '继续《' + song.title + '》 · ' + resume.label + ' · ' + resume.bpm + ' BPM'; }
   const c = settings.checked || {};
   $('#first-run').hidden = !!(c.mic && c.heard && c.click);
   const h = loadHistory().slice(-4).reverse();
@@ -81,9 +85,9 @@ $('#hist-more').onclick = (e) => { e.preventDefault(); location.hash = '#history
 function histItem(e) {
   const d = new Date(e.at), when = `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   if (e.type === 'song' || e.type === 'drill') {
-    const detail = e.type === 'drill' ? `认识指板 · 一次弹对率 ${e.score}%` : `${e.mode === 'along' ? '跟拍' : '等我'} · 音准 ${e.pitch}%${e.rhythm !== null && e.rhythm !== undefined ? ' · 节奏 ' + e.rhythm + '%' : ''} · ${e.bpm} BPM`;
+    const detail = e.type === 'drill' ? `认识指板 · 一次弹对率 ${e.score}%` : `${e.mode === 'along' ? '跟拍' : '等我'} · ${e.pitch == null ? '音准未评' : '音准 ' + e.pitch + '%'}${e.rhythm !== null && e.rhythm !== undefined ? ' · 节奏 ' + e.rhythm + '%' : ''} · ${e.bpm} BPM${e.scopeLabel ? ' · ' + esc(e.scopeLabel) + ' · ' + esc(e.guideLabel) : ''}`;
     const href = e.type === 'drill' ? '#frets' : '#play/' + e.id;
-    return `<a class="item" href="${href}"><span class="num">${e.type === 'drill' ? '▦' : '♪'}</span><span class="meta"><b>${esc(e.title)}</b><small>${detail}</small></span><span class="side"><span class="stars-s">${STARS(e.stars || 0)}</span><br>${when}</span></a>`;
+    return `<a class="item" href="${href}"><span class="num">${e.type === 'drill' ? '▦' : '♪'}</span><span class="meta"><b>${esc(e.title)}</b><small>${detail}</small></span><span class="side"><span class="stars-s">${e.score === null ? '未评' : STARS(e.stars || 0)}</span><br>${when}</span></a>`;
   }
   if (e.type === 'beat') return `<a class="item" href="#beat"><span class="num">◉</span><span class="meta"><b>节奏训练 · ${esc(e.name || '')}</b><small>${esc(e.meter || '')} · ${e.src === 'external' ? '外部节拍器 ' : ''}${e.bpm}${e.endBpm && e.endBpm !== e.bpm ? '→' + e.endBpm : ''} BPM · 准确率 ${pct(e.accuracy || 0)} · ±${Math.round(e.stdMs || 0)}ms${e.drill ? ' · 专项' : ''}</small></span><span class="side">${when}</span></a>`;
   if (e.type === 'rhythm') return `<a class="item" href="#rhythm"><span class="num">◔</span><span class="meta"><b>节奏测试</b><small>${esc(e.name || '')} · 准确率 ${pct(e.accuracy || 0)}</small></span><span class="side">${when}</span></a>`;
@@ -93,7 +97,7 @@ function histItem(e) {
 // ---------- 曲库 ----------
 function renderSongs() {
   const best = {};
-  for (const e of loadHistory()) if (e.type === 'song') best[e.id] = Math.max(best[e.id] || 0, e.stars || 0);
+  for (const e of loadHistory()) if (e.type === 'song' && !e.range) best[e.id] = Math.max(best[e.id] || 0, e.stars || 0);
   // 按难度排（同一难度保持原顺序）
   $('#song-list').innerHTML = [...SONGS].sort((a, b) => a.level - b.level).map((s, i) => {
     const notes = parseSong(s).filter((n) => n.midi !== null);

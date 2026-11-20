@@ -210,12 +210,8 @@ export function detectPitch(buf, sampleRate, opts = {}) {
       const hp = nearTau(localPeaks, chosen.tau / ratio);
       if (hp && hp.freq >= minFreq && hp.freq <= maxFreq && hp.val >= SUB_4F) { folded = hp; break; }
     }
-    if (folded) chosen = folded;
-    else {
-      let f = chosen.freq;
-      while (f * 2 <= maxFreq && f < minFreq) f *= 2;
-      chosen = { ...chosen, freq: f };
-    }
+    if (!folded) return null;
+    chosen = folded;
   }
 
   // 周期置信度看相关峰（含被抑制的次谐波）的最大 NSDF，避免真峰因 0.5 左右的 NSDF 被 minClarity 丢掉
@@ -516,15 +512,17 @@ export function estimateLatency(onsets, expected, windowMs = 250) {
   return { latencyMs: med, spreadMs: mad, n: errs.length };
 }
 
-/**
- * 把测得音与目标音的音分差折到可比较的范围。
- * octaveFree：任意八度都只看音名；否则仅折回 1 或 2 个八度的同音名误判（检测器把 C4 听成 C2 时的安全网）。
- */
-export function snapCents(c, octaveFree = false, maxOct = 2) {
-  if (octaveFree) return c - 1200 * Math.round(c / 1200);
-  const oct = Math.round(c / 1200);
-  if (oct !== 0 && Math.abs(oct) <= maxOct) return c - 1200 * oct;
-  return c;
+/** 仅音名练习允许忽略八度；严格练习保留有符号的完整音分差。 */
+export function snapCents(c, octaveFree = false) {
+  return octaveFree ? c - 1200 * Math.round(c / 1200) : c;
+}
+
+/** 所有实际观测帧（包括无音高）进入分母，至少两帧支持才判中。 */
+export function pitchWindowVerdict(cents, total, tolerance) {
+  const good = cents.filter((c) => Math.abs(c) <= tolerance);
+  const need = Math.max(2, Math.ceil(total * 0.3));
+  const reason = cents.length < need ? 'insufficient' : good.length < need ? 'off_pitch' : 'hit';
+  return { good, need, reason };
 }
 
 /**
@@ -538,7 +536,7 @@ export class NoteSequenceTracker {
     this.tol = opts.tolCents ?? 20;
     this.stable = opts.stableFrames ?? 4;
     this.a4 = opts.a4 ?? 440;
-    this.octaveFree = opts.octaveFree ?? true;
+    this.octaveFree = opts.octaveFree ?? false;
     this.advanceOnMiss = opts.advanceOnMiss ?? false;
     this.idx = 0;
     this.locked = false; this.lockedMidi = null;

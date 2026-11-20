@@ -1,6 +1,7 @@
 // core.js — 全局状态：设置、存储、音频引擎、麦克风、音高/起音数据流
+import { PitchRecognizer } from './recognition.js';
 import { AudioEngine, Metronome } from './audio.js';
-import { detectPitch, noteFromFreq, centsBetween, OnsetDetector, rms, SPEAKER_BAND, PITCH_MIN_FREQ, PITCH_MAX_FREQ } from './dsp.js';
+import { noteFromFreq, OnsetDetector, rms, SPEAKER_BAND } from './dsp.js';
 import { diag, logDiag, sanitizeSettings, settingsDiff, collectAudioEnv, collectBrowserEnv } from './diag.js';
 
 export const $ = (s, el = document) => el.querySelector(s);
@@ -17,7 +18,7 @@ export const settings = Object.assign({
 }, json(localStorage.getItem(LS_SET)) || {});
 const setListeners = new Set();
 export function saveSettings() { localStorage.setItem(LS_SET, JSON.stringify(settings)); setListeners.forEach((f) => f(settings)); }
-export function onSettings(fn) { setListeners.add(fn); }
+export function onSettings(fn) { setListeners.add(fn); return () => setListeners.delete(fn); }
 export function markChecked(k) { if (!settings.checked[k]) { settings.checked[k] = true; saveSettings(); } }
 
 export function loadHistory() { return json(localStorage.getItem(LS_HIST)) || []; }
@@ -26,7 +27,10 @@ export function addHistory(e) {
   while (hst.length > 300) hst.shift();
   localStorage.setItem(LS_HIST, JSON.stringify(hst));
 }
-export function clearHistory() { localStorage.removeItem(LS_HIST); }
+const RESUME = 'guitar-practice:resume';
+export function loadResume() { return json(localStorage.getItem(RESUME)); }
+export function saveResume(state) { localStorage.setItem(RESUME, JSON.stringify(state)); }
+export function clearHistory() { localStorage.removeItem(LS_HIST); localStorage.removeItem(RESUME); }
 
 // ---------- 音频 ----------
 export const engine = new AudioEngine();
@@ -60,48 +64,27 @@ export const onOnset = (fn) => (onsetSubs.add(fn), () => onsetSubs.delete(fn)); 
 export const onMic = (fn) => (micSubs.add(fn), () => micSubs.delete(fn));         // fn(state)
 export const live = { db: -100, freq: null, note: null, onsets: 0, micError: '' };
 
-let loopStarted = false, onsetDet = null;
+let recognizer, onsetDet = null;
 export function resetOnsetDetector() { if (engine.ctx) onsetDet = new OnsetDetector(engine.ctx.sampleRate, onsetOpts()); }
 onSettings(() => { resetOnsetDetector(); metro.volume = settings.volume; metro.sound = settings.outMode !== 'silent'; });
 
 function startLoop() {
-  if (loopStarted) return; loopStarted = true;
-  const sr = engine.ctx.sampleRate, N = sr > 60000 ? 4096 : 2048;
-  const buf = new Float32Array(N), scratch = new Float32Array(N);
+  if (recognizer) { recognizer.reset(); return; }
+  recognizer = new PitchRecognizer(engine.ctx.sampleRate);
   resetOnsetDetector();
   engine.onChunk((data, t) => {
     trackNoise(data);
     onsetDet.gate = gateRms() * 0.8;
     for (const o of onsetDet.process(data, t)) { live.onsets++; onsetSubs.forEach((f) => f(o)); }
+    recognizer.process(data, t, gateRms(), (frame) => {
+      live.db = frame.db;
+      live.freq = frame.freq;
+      live.note = frame.freq ? noteFromFreq(frame.freq, settings.a4) : null;
+      if (frame.freq) markChecked('heard');
+      pitchSubs.forEach((fn) => fn(frame));
+    });
   });
-  const hist = [];
-  let held = null, last = 0;
-  const tick = (now) => {
-    requestAnimationFrame(tick);
-    if (!engine.micOn || now - last < 40) return;
-    last = now;
-    engine.latest(N, buf);
-    const level = rms(buf, N - 1024);
-    live.db = level > 0 ? 20 * Math.log10(level) : -100;
-    const r = detectPitch(buf, sr, { rmsGate: gateRms(), minFreq: PITCH_MIN_FREQ, maxFreq: PITCH_MAX_FREQ, _scratch: scratch });
-    if (r) {
-      if (hist.length && Math.abs(centsBetween(r.freq, median(hist))) > 80) hist.length = 0;
-      hist.push(r.freq); if (hist.length > 5) hist.shift();
-      held = { f: median(hist), t: now };
-    } else hist.length = 0;
-    const smooth = hist.length ? median(hist) : null;
-    const show = smooth || (held && now - held.t < 800 ? held.f : null);
-    live.freq = smooth;
-    live.note = smooth ? noteFromFreq(smooth, settings.a4) : null;
-    if (smooth) markChecked('heard');
-    // 帧时间：缓冲区中心对应的音频时钟时间
-    const time = engine.lastFrameTime - N / 2 / sr;
-    const frame = { raw: r ? r.freq : null, freq: smooth, show, held: !smooth && !!show, time, db: live.db, clarity: r ? r.clarity : null, rms: r ? r.rms : level };
-    pitchSubs.forEach((f) => f(frame));
-  };
-  requestAnimationFrame(tick);
 }
-const median = (a) => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
 
 export async function enableMic() {
   live.micError = '';
@@ -205,7 +188,7 @@ function attachDiagStreams() {
     const src = fr.raw || fr.freq;
     const note = src ? noteFromFreq(src, settings.a4) : null;
     diag.logPitch({
-      raw: fr.raw, freq: fr.freq, held: fr.held, db: fr.db, clarity: fr.clarity, rms: fr.rms,
+      status: fr.status, gate: fr.gate, audioTime: fr.time, raw: fr.raw, freq: fr.freq, held: fr.held, db: fr.db, clarity: fr.clarity, rms: fr.rms,
       midi: note ? note.midi : undefined,
       name: note ? note.name + note.octave : undefined,
       cents: note ? note.cents : undefined,

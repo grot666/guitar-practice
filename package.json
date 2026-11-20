@@ -2,5 +2,5 @@
   "name": "guitar-practice",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node tests/dsp.test.mjs && node tests/songs.test.mjs && node tests/harmony.test.mjs && node tests/audio.test.mjs && node tests/bass.test.mjs && node tests/rhythm.test.mjs && node tests/loopback.test.mjs && node tests/diag.test.mjs", "e2e": "python3 tests/e2e_beat.py" }
+  "scripts": { "test": "node tests/dsp.test.mjs && node tests/recognition.test.mjs && node tests/phrase.test.mjs && node tests/phrase-flow.test.mjs && node tests/songs.test.mjs && node tests/harmony.test.mjs && node tests/audio.test.mjs && node tests/bass.test.mjs && node tests/rhythm.test.mjs && node tests/loopback.test.mjs && node tests/diag.test.mjs", "e2e": "python3 tests/e2e_beat.py" }
 }

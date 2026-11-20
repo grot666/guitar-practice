@@ -180,7 +180,7 @@ console.log('== 11. 端到端：合成“演奏”（带抖动和延迟）→ �
 console.log('== 12. 音准练习跟踪器：E 小调五声音阶');
 {
   const targets = [40, 43, 45, 47, 50, 52];
-  const tr = new NoteSequenceTracker(targets, { tolCents: 20, stableFrames: 3 });
+  const tr = new NoteSequenceTracker(targets, { tolCents: 20, stableFrames: 3, octaveFree: true });
   const feed = (freq, frames) => { const evs = []; for (let i = 0; i < frames; i++) { const e = tr.update({ freq, time: 0 }); if (e) evs.push(e); } return evs; };
   const sil = () => feed(null, 3);
   const evs = [];
@@ -333,7 +333,7 @@ console.log('== 17. 音高检测：干净的低音弦不得被向上折八度');
   ok(bad === 0, 'E2/F2 等低音不得被折高八度');
 }
 
-console.log('== 18. 跟踪器：中途改容差立即生效；1–2 个八度误判在未开「高低八度」时仍算对');
+console.log('== 18. 跟踪器：中途改容差立即生效；严格模式保留八度差');
 {
   const f30 = midiToFreq(60) * Math.pow(2, 30 / 1200);
   const tr = new NoteSequenceTracker([60], { tolCents: 20, stableFrames: 3, octaveFree: false });
@@ -349,12 +349,12 @@ console.log('== 18. 跟踪器：中途改容差立即生效；1–2 个八度误
   const tr2 = new NoteSequenceTracker([60], { tolCents: 20, stableFrames: 3, octaveFree: false });
   ev = null;
   for (let i = 0; i < 3; i++) ev = tr2.update({ freq: midiToFreq(36), time: i }); // C2
-  ok(ev && ev.type === 'hit' && Math.abs(ev.cents) < 1, '目标 C4、听到 C2 时应折回同音名并算对（安全网）');
+  ok(ev && ev.type === 'miss' && Math.abs(ev.cents + 2400) < 1, '严格模式拒绝 C2 代替 C4');
 
   const tr3 = new NoteSequenceTracker([64], { tolCents: 20, stableFrames: 3, octaveFree: false });
   ev = null;
   for (let i = 0; i < 3; i++) ev = tr3.update({ freq: midiToFreq(40), time: i }); // E2 vs E4
-  ok(ev && ev.type === 'hit' && Math.abs(ev.cents) < 1, '目标 E4、听到 E2 时应折回并算对');
+  ok(ev && ev.type === 'miss' && Math.abs(ev.cents + 2400) < 1, '严格模式拒绝 E2 代替 E4');
 }
 
 console.log(fails ? `\n失败 ${fails} 项` : '\n全部通过');

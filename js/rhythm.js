@@ -23,6 +23,7 @@ const SIMPLE = ['2/4', '3/4', '4/4'];
 export const PATTERNS = [
   { id: 'q', name: '四分音符', short: '♩', hint: '每拍一下。先把「拍子」本身弹稳。', meters: SIMPLE, cell: 1, res: 1, level: 1, hits: [[0, 'D']] },
   { id: 'e', name: '八分音符', short: '♫', hint: '每拍两下，数「1 和 2 和」，下上交替。', meters: SIMPLE, cell: 1, res: 2, level: 1, hits: [[0, 'D'], [0.5, 'U']] },
+  { id: 'chord-change', name: '开放和弦转换 · Em / G', short: 'Em → G', hint: '每小节第一拍向下扫一次。Em、G 交替；只评换和弦后的落拍。', meters: ['4/4'], cell: 4, res: 1, level: 1, hits: [[0, 'D']], chords: ['Em', 'G'] },
   { id: 'rest', name: '四分 + 休止', short: '♩ 𝄽', hint: '弹一拍、空一拍。休止也要「数」出来，别提前进。', meters: ['2/4', '4/4'], cell: 2, res: 1, level: 1, hits: [[0, 'D']] },
   { id: 'off', name: '反拍八分', short: '𝄾♪', hint: '拍上休止，只弹「和」。心里数拍，手在拍上空挥一下。', meters: SIMPLE, cell: 1, res: 2, level: 2, hits: [[0.5, 'U']] },
   { id: 't', name: '三连音', short: '³♪♪♪', hint: '一拍均分三下，数「1 2 3」。三个音要一样长。', meters: SIMPLE, cell: 1, res: 3, level: 2, hits: [[0, 'D'], [1 / 3, 'U'], [2 / 3, 'D']] },
