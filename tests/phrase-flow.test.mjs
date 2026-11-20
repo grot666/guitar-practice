@@ -66,3 +66,14 @@ assert.equal(practiceState().running,true);
 await el('#p-start').click();
 assert.equal(practiceState().running,false);
 closePractice();
+
+// A score token's offsetLeft is relative to the scroll container. The page's
+// centered layout must not delay following a note that is outside the viewport.
+const { markMelody } = await import('../js/melody-score.js');
+const active = { dataset:{start:8,end:9}, offsetLeft:620, classList:{toggle(){}} };
+Object.assign(el('#p-score-notes'),{clientWidth:300,offsetLeft:335,scrollLeft:0});
+document.querySelectorAll = selector => selector === '#p-score-notes .score-note' ? [active] : [];
+markMelody(8.25);
+assert.ok(el('#p-score-notes').scrollLeft > 320, 'active note must be inside the viewport');
+assert.ok(el('#p-score-notes').scrollLeft <= 620, 'must not scroll past the active note');
+console.log('居中布局下简谱自动滚动通过');

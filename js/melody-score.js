@@ -31,7 +31,8 @@ export function markMelody(position) {
   });
   if (current && current !== previous) {
     const parent = $('#p-score-notes');
-    parent.scrollLeft = Math.max(0, current.offsetLeft - parent.offsetLeft - parent.clientWidth / 3);
+    // Tokens are positioned relative to this scroll container, not the page.
+    parent.scrollLeft = Math.max(0, current.offsetLeft - parent.clientWidth / 3);
   }
   previous = current;
 }
