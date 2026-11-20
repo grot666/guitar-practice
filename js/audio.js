@@ -126,6 +126,17 @@ export class AudioEngine {
   }
   get deviceId() { const t = this.stream && this.stream.getAudioTracks()[0]; return t ? (t.getSettings().deviceId || '') : ''; }
   get deviceLabel() { const t = this.stream && this.stream.getAudioTracks()[0]; return t ? t.label : ''; }
+  /** 麦克风轨道的非标识设置（不含 deviceId / groupId / 设备名），供诊断日志使用 */
+  micTrackInfo() {
+    const t = this.stream && this.stream.getAudioTracks()[0];
+    if (!t) return { active: false };
+    const s = t.getSettings ? t.getSettings() : {};
+    const out = { active: t.readyState === 'live', muted: !!t.muted, enabled: t.enabled !== false, readyState: t.readyState };
+    for (const k of ['sampleRate', 'sampleSize', 'channelCount', 'echoCancellation', 'noiseSuppression', 'autoGainControl', 'latency', 'voiceIsolation']) {
+      if (s[k] !== undefined) out[k] = s[k];
+    }
+    return out;
+  }
   /** 合成一个拨弦音（Karplus-Strong，结果缓存），用于示范演奏和点按指板试听 */
   _pluckBuffer(midi) {
     this._pl = this._pl || new Map();

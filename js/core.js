@@ -1,6 +1,7 @@
 // core.js — 全局状态：设置、存储、音频引擎、麦克风、音高/起音数据流
 import { AudioEngine, Metronome } from './audio.js';
 import { detectPitch, noteFromFreq, centsBetween, OnsetDetector, rms, SPEAKER_BAND, PITCH_MIN_FREQ, PITCH_MAX_FREQ } from './dsp.js';
+import { diag, logDiag, sanitizeSettings, settingsDiff, collectAudioEnv, collectBrowserEnv } from './diag.js';
 
 export const $ = (s, el = document) => el.querySelector(s);
 export const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
@@ -95,7 +96,7 @@ function startLoop() {
     if (smooth) markChecked('heard');
     // 帧时间：缓冲区中心对应的音频时钟时间
     const time = engine.lastFrameTime - N / 2 / sr;
-    const frame = { raw: r ? r.freq : null, freq: smooth, show, held: !smooth && !!show, time, db: live.db };
+    const frame = { raw: r ? r.freq : null, freq: smooth, show, held: !smooth && !!show, time, db: live.db, clarity: r ? r.clarity : null, rms: r ? r.rms : level };
     pitchSubs.forEach((f) => f(frame));
   };
   requestAnimationFrame(tick);
@@ -185,3 +186,67 @@ export function releaseMicForPlayback(reason = '') {
   toast(`已关闭麦克风${reason}：开着麦克风时，手机外放声音会变小（iPhone 会从听筒出声）。`, 4200);
   return true;
 }
+
+
+// ---------- 开发者诊断日志（未在记录时全部是空操作，不改变检测算法） ----------
+diag.setEnvProvider(() => {
+  const { audio, mic } = collectAudioEnv(engine);
+  return { browser: collectBrowserEnv(), audio, mic, view: typeof location !== 'undefined' ? (location.hash || '#home') : undefined };
+});
+diag.setSettingsProvider(() => settings);
+
+let diagPrevSettings = sanitizeSettings(settings);
+let diagUnsubs = [];
+function attachDiagStreams() {
+  if (diagUnsubs.length) return;
+  diagPrevSettings = sanitizeSettings(settings);
+  diagUnsubs.push(onPitch((fr) => {
+    if (!diag.status().recording) return;
+    const src = fr.raw || fr.freq;
+    const note = src ? noteFromFreq(src, settings.a4) : null;
+    diag.logPitch({
+      raw: fr.raw, freq: fr.freq, held: fr.held, db: fr.db, clarity: fr.clarity, rms: fr.rms,
+      midi: note ? note.midi : undefined,
+      name: note ? note.name + note.octave : undefined,
+      cents: note ? note.cents : undefined,
+    });
+  }));
+  diagUnsubs.push(onOnset((t) => { logDiag('onset', { audioTime: t }); }));
+  diagUnsubs.push(onMic((st) => {
+    logDiag('mic', {
+      state: st,
+      error: st === 'error' ? (live.micError || '') : undefined,
+      track: engine.micTrackInfo ? engine.micTrackInfo() : undefined,
+      audio: collectAudioEnv(engine).audio,
+    });
+  }));
+  diagUnsubs.push(onSettings((s) => {
+    const changed = settingsDiff(diagPrevSettings, s);
+    diagPrevSettings = sanitizeSettings(s);
+    if (Object.keys(changed).length) logDiag('settings', { changed });
+  }));
+  if (typeof window !== 'undefined') {
+    const onHash = () => logDiag('view', { hash: location.hash || '#home' });
+    window.addEventListener('hashchange', onHash);
+    diagUnsubs.push(() => window.removeEventListener('hashchange', onHash));
+    if (!window.__gpDiagErrBound) {
+      window.__gpDiagErrBound = true;
+      const onErr = (ev) => {
+        if (!diag.status().recording) return;
+        if (ev && ev.type === 'unhandledrejection') {
+          const r = ev.reason;
+          logDiag('error', { kind: 'unhandledrejection', message: String((r && r.message) || r || '') });
+        } else {
+          logDiag('error', { kind: 'window', message: ev && ev.message, source: ev && ev.filename, line: ev && ev.lineno, col: ev && ev.colno });
+        }
+      };
+      window.addEventListener('error', onErr);
+      window.addEventListener('unhandledrejection', onErr);
+    }
+  }
+}
+function detachDiagStreams() {
+  diagUnsubs.forEach((u) => { try { u && u(); } catch {} });
+  diagUnsubs = [];
+}
+diag.onChange((st) => { if (st.recording) attachDiagStreams(); else detachDiagStreams(); });

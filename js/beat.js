@@ -1,5 +1,6 @@
 // beat.js — 「节奏训练」页：节奏型 + 节拍器（内置 / 外部）+ 每一下的早晚 + 小节结算 + 诊断 + 专项 + 自动调速
 import { $, $$, esc, settings, onSettings, engine, metro, onOnset, needMic, gateRms, loadHistory, addHistory, css, pct, toast, markChecked } from './core.js';
+import { logDiag } from './diag.js';
 import { METERS, patternsFor, getPattern, gridCells, RhythmSession, TempoLadder, clickOn, ExternalClickTracker } from './rhythm.js';
 import { runLoopback, loopbackMessage, listenExternal, externalMessage, testBusy } from './latency.js';
 
@@ -133,6 +134,7 @@ async function start(opts = {}) {
   else startInternal();
   $('#bt-start').textContent = '■ 停止';
   $('#bt-last').textContent = '—'; $('#bt-last').className = ''; $('#bt-last-l').textContent = '';
+  logDiag('beat', { kind: 'start', mode: run.mode, pattern: pattern.id, patternName: pattern.name, meter: meter.id, bpm: run.bpm, bars: run.bars, tolG: cfg.tolG, tolY: cfg.tolY, latencyMs: run.mode === 'external' ? 0 : settings.latencyMs, focus: !!run.focus });
   renderHeader();
   run.timer = setInterval(tickRun, 30);
   requestAnimationFrame(frame);
@@ -244,6 +246,13 @@ function tickRun() {
 function onHit(t) {
   if (!run) return;
   const r = run.session.hit(t);
+  if (!(r.extra && !r.bar)) {
+    logDiag('beat', {
+      kind: 'hit', t, errMs: r.errMs, grade: r.grade, at: r.at, pos: r.label, i: r.i,
+      extra: !!r.extra, bar: r.bar ? r.bar.index : undefined,
+      tolG: cfg.tolG, tolY: cfg.tolY, bpm: run.bpm, latencyMs: run.lat * 1000, mode: run.mode,
+    });
+  }
   if (r.extra && !r.bar) return; // 预备拍里的
   const el = $('#bt-last');
   if (r.extra) { el.textContent = '多弹'; el.className = 'muted'; $('#bt-last-l').textContent = '这里不该弹（休止 / 不在节奏型里）'; return; }
@@ -259,6 +268,12 @@ function onHit(t) {
   if (cfg.beep && run.mode === 'internal' && settings.outMode !== 'silent') engine.blip(r.grade === 'green' ? 3400 : r.grade === 'yellow' ? 2900 : 2450, 0.18);
 }
 function onBarClosed(bar, res) {
+  logDiag('beat', {
+    kind: 'bar', index: bar.index, bpm: bar.bpm, muted: !!bar.muted,
+    accuracy: res.accuracy, miss: res.miss, extras: res.extras.length, ok: res.ok,
+    notes: res.notes.map((n) => ({ at: n.at, errMs: n.errMs, grade: n.grade })),
+    tolG: cfg.tolG, tolY: cfg.tolY, mode: run.mode,
+  });
   let arrow = '';
   if (run.ladder && bar.index < run.bars - 1) {
     const ch = run.ladder.update(res.ok);
@@ -341,6 +356,7 @@ function finish(early) {
   if (r.mode === 'internal' && r.ladder && !r.focus) setBpmFor(r, Math.max(r.startBpm, r.ladder.bpm - (d.accuracy < 0.7 ? 4 : 0)));
   addHistory({ type: 'beat', pat: r.pattern.id, name: r.pattern.name, meter: r.meter.id, bpm: r.startBpm, endBpm, topBpm: r.ladder ? r.ladder.top : r.bpm, bars: d.bars,
     accuracy: d.accuracy, meanMs: d.meanMs, stdMs: d.stdMs, hitRate: d.hitRate, extras: d.extras, src: r.mode, drill: !!r.focus, latencyMs: r.mode === 'internal' ? settings.latencyMs : 0 });
+  logDiag('beat', { kind: 'finish', early, pattern: r.pattern.id, meter: r.meter.id, mode: r.mode, startBpm: r.startBpm, endBpm, bars: d.bars, accuracy: d.accuracy, meanMs: d.meanMs, stdMs: d.stdMs, hitRate: d.hitRate, extras: d.extras, grades: d.grades, tendency: d.tendency, stability: d.stability, latencyMs: r.mode === 'internal' ? settings.latencyMs : 0 });
   _lastDiag = d;
   renderDiag(d, r, endBpm);
   if (!r.focus) prevDiag = d;

@@ -18,6 +18,9 @@
   <button id="mic-chip" class="mic-chip" aria-label="麦克风">
     <span class="mic-dot"></span><span class="mic-lvl"><i></i></span><span id="mic-chip-text">开麦克风</span>
   </button>
+  <button id="log-chip" class="log-chip" hidden aria-label="正在记录诊断日志">
+    <span class="log-dot"></span><span id="log-chip-text">记录中</span>
+  </button>
   <button id="open-settings" class="icon-btn" aria-label="设置"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></button>
 </header>
 <div id="toast" class="toast" hidden></div>
@@ -362,6 +365,20 @@
       <p class="hint">容差只用于稍微不准的音；差了八度不会因为加大容差而算对。</p>
       <label class="switch"><input id="s-oct" type="checkbox"><span></span>高/低八度也算对</label>
       <label class="slider"><span>标准音 A4 <b id="s-a4-v">440 Hz</b></span><input id="s-a4" type="range" min="430" max="450" step="1"></label>
+    </section>
+
+    <section class="ds" id="s-log-sec">
+      <h3>开发者模式</h3>
+      <p class="hint">只记录诊断信息（听到的音高、判定结果、当前设置、麦克风状态），<b>不含原始录音，也不会上传到任何服务器</b>。用来排查「弹的是 C4 却显示成 C2」或容差、节奏判定不准这类问题。练习过程中可以随时打开本面板开始或停止，不必离开当前页面。</p>
+      <div class="row wrap">
+        <button id="s-log-start" class="btn primary">开始记录日志</button>
+        <button id="s-log-stop" class="btn" disabled>停止记录</button>
+      </div>
+      <div class="row wrap">
+        <button id="s-log-export" class="btn" disabled>导出日志</button>
+        <button id="s-log-clear" class="btn danger" disabled>清空日志</button>
+      </div>
+      <p id="s-log-status" class="hint">未在记录</p>
     </section>
 
     <section class="ds">
