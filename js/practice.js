@@ -1,3 +1,5 @@
+import { renderMelody, markMelody, melodyTonic } from './melody-score.js';
+import { pitchLabels } from './note-names.js';
 import { annotate, phrases, sliceRange, barLabel, rangeLabel, reviewPhrase, difficulty } from './phrase.js';
 // practice.js — 练曲子 / 认识指板 的练习界面：滚动六线谱、指板提示、音高判定、「等我」和「跟拍」两种模式
 import { $, $$, esc, settings, engine, metro, needMic, releaseMicForPlayback, onPitch, onOnset, onMic, onSettings, addHistory, loadHistory, saveResume, css, fmtC, pct, posText } from './core.js';
@@ -28,6 +30,7 @@ export function openPractice(song, opts = {}) {
     S.range = validRange(saved.range); S.parent = validRange(saved.parent);
     S.focusBar = Number.isInteger(saved.focusBar) ? saved.focusBar : null;
   }
+  $('#v-play').dataset.melody = String(!S.drill);
   $('#p-phrase').hidden = S.drill;
   $('#p-loop').checked = false;
   $('#p-guide').value = S.guide;
@@ -36,8 +39,8 @@ export function openPractice(song, opts = {}) {
   applyRange();
   $('#p-title').textContent = song.title;
   const strs = [...new Set(pitched.map((n) => n.string))].sort();
-  $('#p-meta').textContent = S.drill ? `${pitched.length} 个音 · ${strs.map((s) => s + '弦').join(' ')}` : `${song.en} · ${song.beats}/4 · ${pitched.length} 个音 · 用到 ${strs.join('、')} 弦`;
-  $('#p-tip').textContent = song.tip || '';
+  $('#p-meta').textContent = S.drill ? `${pitched.length} 个音 · ${strs.map((s) => s + '弦').join(' ')}` : `${song.en} · ${song.beats}/4 · ${pitched.length} 个音`;
+  $('#p-tip').textContent = S.drill ? song.tip || '' : '先认音名和唱名，再跟着简谱弹；点当前音可以试听。';
   $('#p-mode').hidden = S.drill;
   $('#p-demo').hidden = S.drill;
   $('.tempo').hidden = S.drill;
@@ -68,6 +71,7 @@ function applyRange() {
   $('#p-return').hidden = !S.parent;
   $('#p-previous-hard').hidden = !S.hard || S.focusBar !== null;
   if (S.hard) $('#p-previous-hard').textContent = '重练' + barLabel(S.hard.bar);
+  renderMelody(S);
   resetRun();
 }
 function remember() {
@@ -239,7 +243,7 @@ onPitch((fr) => {
     setFeedback(`${ev.cents > 0 ? '偏高' : '偏低'} ${Math.abs(Math.round(ev.cents))} 音分，再来`, 'warn');
     logPracticeScore(ev, n, r, fr.time);
   } else {
-    const want = posText(n.string, n.fret);
+    const want = S.drill ? posText(n.string, n.fret) : n.name + ' · ' + pitchLabels(n.midi).fixed;
     setFeedback(`弹成了 ${midiName(ev.playedMidi)} · 应该是 ${want}`, 'bad');
     logPracticeScore(ev, n, r, fr.time);
   }
@@ -253,6 +257,12 @@ function setFeedback(txt, cls) {
 function updateNow() {
   const n = S.pitched[S.idx], nx = S.pitched[S.idx + 1];
   if (!n) { $('#p-pos').textContent = '完成'; $('#p-note').textContent = ''; markBoard($('#p-board'), null, null); return; }
+  if (!S.drill) {
+    const label = pitchLabels(n.midi, melodyTonic(S.song));
+    $('#p-pos').textContent = label.name + ' · ' + label.fixed;
+    $('#p-note').textContent = '简谱 ' + label.number + (nx ? ' · 下一个 ' + nx.name : '');
+    markMelody(n.start); return;
+  }
   if (S.names) { $('#p-pos').textContent = n.name.replace(/\d+$/, ''); $('#p-note').textContent = `${n.name} · 在哪根弦？`; }
   else { $('#p-pos').textContent = posText(n.string, n.fret); $('#p-note').textContent = `${n.name}${nx ? ' · 下一个 ' + posText(nx.string, nx.fret) : ''}`; }
   markBoard($('#p-board'), S.names ? null : n, S.names ? null : nx);
@@ -319,7 +329,7 @@ function finish() {
   $('#r-title').textContent = stars === 3 ? '太棒了！' : stars === 2 ? '很不错！' : stars === 1 ? '完成了，继续加油' : '再试一次吧';
   $('#r-stats').innerHTML = stats.map(([v, l]) => `<div class="stat"><b>${v}</b><span>${l}</span></div>`).join('');
   $('#r-trouble').innerHTML = (trouble.length
-    ? `<div class="trouble">要多练的位置：${trouble.map((t) => `<b>${posText(t.n.string, t.n.fret)}</b>（${t.n.name}）×${t.c}`).join('，')}</div>` : '') +
+    ? `<div class="trouble">要多练的音：${trouble.map((t) => `<b>${S.drill ? posText(t.n.string, t.n.fret) : pitchLabels(t.n.midi).fixed}</b>（${t.n.name}）×${t.c}`).join('，')}</div>` : '') +
     (along && rhythm && Math.abs(rhythm.meanErrorMs) > 25 ? `<div class="trouble">整体${rhythm.meanErrorMs > 0 ? '偏晚（拖拍）' : '偏早（抢拍）'} ${Math.abs(Math.round(rhythm.meanErrorMs))} ms${settings.latencyMs === 0 ? '，还没校准延迟，去设置里校准一下' : ''}</div>` : '') +
     (!along && stars >= 2 && !S.drill ? `<div class="trouble">下一步：试试「跟拍」模式，或者把速度调快一点。</div>` : '') +
     (avgC > 15 ? `<div class="trouble">平均偏差 ${Math.round(avgC)} 音分：先去「调音」把琴调准，按弦时手指靠近品丝。</div>` : '');
@@ -353,7 +363,7 @@ function drawLoop() {
   requestAnimationFrame(drawLoop);
   if (!S || $('#v-play').hidden) return;
   const cv = $('#lane'), dpr = Math.min(2, window.devicePixelRatio || 1);
-  const W = cv.clientWidth, H = cv.clientHeight;
+  const W = S.drill ? cv.clientWidth : 600, H = cv.clientHeight || 180;
   if (!W) return;
   if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
   const theme = document.documentElement.dataset.theme;
@@ -377,6 +387,10 @@ function drawLoop() {
     const n = S.pitched[Math.min(S.idx, S.pitched.length - 1)];
     const target = S.idx >= S.pitched.length ? n.start + n.beats : n.start;
     S.pos += (target - S.pos) * 0.16;
+  }
+  if (!S.drill) {
+    markMelody(S.mode === 'wait' && !S.demo ? (S.pitched[S.idx]?.start ?? Infinity) : S.pos);
+    return;
   }
   const top = 22, bottom = H - 18, gap = (bottom - top) / 5, y = (s) => top + (s - 1) * gap;
   // 拍线与小节线
