@@ -42,6 +42,7 @@
     <div class="modes">
       <a class="mode" href="#tuner"><span class="mode-ic">◎</span><b>调音</b><small>标准调弦 E A D G B E</small></a>
       <a class="mode accent" href="#songs"><span class="mode-ic">♪</span><b>练曲子</b><small>小星星、欢乐颂、生日歌…</small></a>
+      <a class="mode" href="#reading"><span class="mode-ic">Aa</span><b>音名与唱名</b><small>C ↔ do · 每天 14 题</small></a>
       <a class="mode" href="#frets"><span class="mode-ic">▦</span><b>认识指板</b><small>空弦和第一把位的音</small></a>
       <a class="mode" href="#rhythm"><span class="mode-ic">◔</span><b>节拍器</b><small>节拍器 · 快速测早晚</small></a>
       <a class="mode wide accent2" href="#beat"><span class="mode-ic">◉</span><b>节奏训练</b><small>每一下早还是晚 · 自动诊断 · 自动加速</small></a>
@@ -49,6 +50,32 @@
     </div>
     <div class="section-h"><h2>最近练习</h2><a href="#" id="hist-more" class="link small">全部</a></div>
     <div id="recent" class="list"></div>
+  </section>
+
+  <section id="v-reading" class="view" hidden>
+    <div class="hero slim"><h1>音名与唱名</h1><p class="muted">先把 C、D、E 和 do、re、mi 对应起来。不需要拿琴，也不用开麦克风。</p></div>
+    <div class="card">
+      <div class="controls">
+        <label>规则 <select id="read-key"><option value="fixed">固定调 · C=do</option><option value="C">首调 · C 大调</option><option value="G">首调 · G 大调</option></select></label>
+        <label>方向 <select id="read-direction"><option value="forward">音名 → 唱名</option><option value="reverse">唱名 → 音名</option><option value="mixed">双向混合</option></select></label>
+      </div>
+      <p class="muted small">固定调：C 始终唱 do。首调：主音唱 do，例如 G 大调的 G 唱 do、F♯ 唱 si。先用固定调练熟，再切换。</p>
+      <div class="center">
+        <p id="read-progress" class="muted">每轮 14 题</p>
+        <div id="read-question" class="read-question">C ↔ do</div>
+        <p id="read-prompt">选出对应的音名或唱名</p>
+        <div id="read-answers" class="read-answers"></div>
+        <p id="read-feedback" role="status" aria-live="polite"></p>
+        <div class="row center wrap">
+          <button id="read-start" class="btn primary">开始一轮</button>
+          <button id="read-listen" class="btn" hidden>听这个音</button>
+          <button id="read-next" class="btn primary" hidden>下一题</button>
+        </div>
+      </div>
+      <p id="read-summary" role="status"></p>
+      <p id="read-last" class="muted small"></p>
+    </div>
+    <details class="card"><summary>固定调对照表</summary><p>C—do　D—re　E—mi　F—fa　G—sol　A—la　B—si</p><p class="muted small">这里使用 si；有些教材写 ti，表示同一个唱名。</p></details>
   </section>
 
   <!-- 调音 -->
@@ -115,11 +142,16 @@
     </div>
     <div class="controls" id="p-phrase">
       <label>练习范围 <select id="p-range"></select></label>
-      <label>提示 <select id="p-guide"><option value="full">谱和指法</option><option value="tab">只看谱</option><option value="memory">背谱</option></select></label>
+      <label>提示 <select id="p-guide"><option value="full">音名 + 唱名 + 简谱</option><option value="tab">只看简谱</option><option value="memory">背谱</option></select></label>
       <label><input id="p-loop" type="checkbox"> 连续循环</label>
       <span id="p-scope" class="muted small"></span>
       <button id="p-previous-hard" class="btn" hidden>练上次难点</button>
       <button id="p-return" class="btn" hidden>接回整句</button>
+    </div>
+    <div id="p-score" class="card">
+      <b id="p-score-key" class="small"></b>
+      <div id="p-score-notes" class="score-scroll" tabindex="0" aria-label="旋律简谱，可左右滚动"></div>
+      <p class="muted small">数字是调内级数，0 是休止；上下点表示八度，下划线表示半拍或四分之一拍，横线延长一拍；⌒ 表示延续前音，不重新拨弦。唱名按固定调显示。</p>
     </div>
     <div class="lane-wrap"><canvas id="lane"></canvas><div id="lane-msg" class="lane-msg"></div></div>
     <div class="now">
